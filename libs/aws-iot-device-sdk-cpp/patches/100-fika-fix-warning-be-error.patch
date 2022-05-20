@@ -1,0 +1,11 @@
+--- a/crt/aws-crt-cpp/crt/aws-lc/crypto/fipsmodule/rand/rand.c
++++ b/crt/aws-crt-cpp/crt/aws-lc/crypto/fipsmodule/rand/rand.c
+@@ -384,7 +384,7 @@ void RAND_bytes_with_additional_data(uin
+     int used_cpu;
+     rand_get_seed(state, seed, &used_cpu);
+ 
+-    uint8_t add_data_for_reseed[CTR_DRBG_ENTROPY_LEN];
++    uint8_t add_data_for_reseed[CTR_DRBG_ENTROPY_LEN] = {0x00}; /*XXX@fika*/
+     size_t add_data_for_reseed_len = 0;
+ #if defined(BORINGSSL_FIPS)
+     // Take a read lock around accesses to |state->drbg|. This is needed to

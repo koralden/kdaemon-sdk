@@ -1,0 +1,12 @@
+--- a/crt/aws-lc/CMakeLists.txt
++++ b/crt/aws-lc/CMakeLists.txt
+@@ -629,6 +629,9 @@ else()
+   message(FATAL_ERROR "Unknown processor:" ${CMAKE_SYSTEM_PROCESSOR})
+ endif()
+ 
++#TODO, just workaround for aarch64 cross compile
++set(ARCH "aarch64")
++
+ if(ANDROID AND NOT ANDROID_NDK_REVISION AND ARCH STREQUAL "arm")
+   # The third-party Android-NDK CMake files somehow fail to set the -march flag
+   # for assembly files. Without this flag, the compiler believes that it's
