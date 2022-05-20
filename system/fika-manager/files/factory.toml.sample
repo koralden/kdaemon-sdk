@@ -1,0 +1,47 @@
+[core]
+pre="/etc/fika_manager/factory/pre_core.sh"
+post="/etc/fika_manager/factory/post_core.sh"
+key = "kap.core"
+[core.cfg]
+wallet_address = "change-me"
+database_url = "redis://127.0.0.1:6379"
+
+[network]
+post="/etc/fika_manager/factory/post_wifi_ssid_by_uci.sh"
+key = "kap.system.config"
+[network.cfg]
+wan_type = 0
+wan_username = "change-me"
+wan_password = "change-me"
+wifi_ssid = "K-Private"
+wifi_password = "change-me"
+password_overwrite = "on"
+
+[por]
+key = "kap.por.config"
+[por.cfg]
+state = false
+nickname = "change-me"
+
+[boss]
+post="/etc/fika_manager/factory/post_boss.sh"
+key = "kap.boss"
+[boss.cfg]
+root_url = "https://oss-api.k36588.info"
+otp_path = "v0/ap/otp"
+ap_token_path = "v0/ap/ap_token"
+hcs_path = "v0/hcs/pair"
+ap_hcs_path = "v0/ap/hcs"
+ap_info_path = "v0/ap/info"
+
+[cmp]
+pre="/etc/fika_manager/factory/pre_cmp.sh"
+post="/etc/fika_manager/factory/post_cmp.sh"
+key = "kap.cmp"
+[cmp.cfg]
+endpoint = "a2dl0okey4lms3-ats.iot.ap-northeast-1.amazonaws.com"
+port = 8883
+thing = "MVP_999999"
+cert = "/etc/fika_iot_gateway/MVP_999999-certificate.pem.crt"
+key = "/etc/fika_iot_gateway/MVP_999999-private.pem.key"
+ca = "/etc/fika_iot_gateway/AmazonRootCA1.pem"

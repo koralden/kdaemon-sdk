@@ -1,0 +1,11 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+/etc/init.d/fika-easy-setup enabled && [ "$ACTION" = "ifup" ] && {
+    if [ ${INTERFACE} = 'kguest' ]; then
+        /etc/init.d/fika-easy-setup restart
+    elif [ ${INTERFACE} = 'lan' ]; then
+        /etc/init.d/fika-easy-setup restart
+    fi
+}

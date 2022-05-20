@@ -1,0 +1,66 @@
+[core]
+thirdparty = "longdong2"
+database = "redis://127.0.0.1:6379"
+config = "/userdata/kdaemon.toml"
+
+[boss]
+otp_path = "v0/ap/otp"
+ap_token_path = "v0/ap/ap_token"
+hcs_path = "v0/hcs/pair"
+ap_hcs_path = "v0/ap/hcs"
+ap_info_path = "v0/ap/info"
+
+[honest]
+ok_cycle = {secs = 300, nanos = 0 }
+fail_cycle = {secs = 10, nanos = 0 }
+path = "/etc/fika_manager/boss_token.sh"
+
+[aws]
+[aws.provision]
+ca = "/etc/fika_manager/AmazonRootCA1.pem"
+cert = "/etc/fika_manager/bootstrap-sdk.certificate.pem"
+private = "/etc/fika_manager/bootstrap-sdk.private.key"
+template = "SdkFleetProvision"
+thing_prefix = "RPI"
+
+[aws.dedicated]
+ca = "/etc/fika_manager/AmazonRootCA1.pem"
+cert = "/userdata/production.certificate.pem"
+private = "/userdata/production.private-key.pem"
+pull_topic = [ "name/ap-info", "name/activation", "name/honest-challenge", "name/pairing" ]
+
+[[subscribe]]
+topic = "kap.system.config"
+path = "/etc/fika_manager/easy_setup.sh"
+
+[[subscribe]]
+topic = "kap.por.config"
+path = "/etc/fika_manager/por_config.sh"
+
+[[subscribe]]
+topic = "aws/kap/shadow/name/ap-info/state"
+path = "/etc/fika_manager/cmp_ap_info.sh"
+
+[[subscribe]]
+topic = "aws/kap/shadow/name/activation/state"
+path = "/etc/fika_manager/activation.sh"
+
+[[subscribe]]
+topic = "boss/ap/info"
+path = "/etc/fika_manager/boss_ap_info.sh"
+
+[[subscribe]]
+topic = "boss.honest.challenger"
+path = "/etc/fika_manager/hcs_honest_challenge.sh"
+
+[[task]]
+topic = "name/provision"
+start_at = {secs = 3, nanos = 0 }
+path = "/etc/fika_manager/provision.sh"
+aws_publish = true
+
+[[task]]
+topic = "name/heartbeat"
+period = {secs = 295, nanos = 0 }
+path = "/etc/fika_manager/heartbeat.sh"
+aws_publish = true

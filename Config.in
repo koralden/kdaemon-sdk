@@ -1,0 +1,23 @@
+menuconfig BR2_PACKAGE_LONGDONG
+	bool "FIKA longdong project"
+	help
+	  Support for FIKA longdong libraries, servers, drivers, and/or
+	  applications in the project.
+
+	  https://github.com/koralden/longdong.git
+
+if BR2_PACKAGE_LONGDONG
+	#menu "Longdong Utilities"
+	#	source package/x11r7/xutil_makedepend/Config.in
+	#	source package/x11r7/mcookie/Config.in
+	#endmenu
+        source package/longdong/libs/aws-iot-device-sdk-embedded-C/Config.in
+        source package/longdong/libs/fika-redis/Config.in
+        #source package/longdong/net/fika-iot-gateway/Config.in
+        source package/longdong/net/fika-easy-setup/Config.in
+        source package/longdong/net/fika-opennds/Config.in
+        source package/longdong/system/fika-manager/Config.in
+endif
+
+comment "longdong needs a toolchain w/ static library"
+	depends on !BR2_STATIC_LIBS

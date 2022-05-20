@@ -1,0 +1,171 @@
+<!doctype html>
+<html>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.2/css/all.min.css">
+    <body class="w3-blue-gray">
+        <div class="w3-bar w3-teal">
+            <a href="https://koralden.com" class="w3-bar-item w3-hover-green">Koralden</a>
+            <a href="/about" class="w3-bar-item w3-hover-green w3-right">About</a>
+            <a href="/terms" class="w3-bar-item w3-hover-green w3-right">Terms</a>
+            <a href="/privacy" class="w3-bar-item w3-hover-green w3-right">Privacy</a>
+        </div>
+        <div class="w3-row">
+            <div class="w3-third w3-auto w3-margin-top w3-xlarge w3-black w3-hide-small w3-show-large w3-show-medium">
+                <a href="/pairing" class="w3-button w3-block w3-left-align"><i class="fas fa-user-plus"></i> Pairing</a>
+                <a href="/setup/easy" class="w3-button w3-block w3-left-align"><i class="fas fa-globe-americas"></i> Network</a>
+                <a href="/por/wifi" class="w3-button w3-block w3-left-align"><i class="fas fa-parking"></i> PoR</a>
+                <a href="/logout" class="w3-button w3-block w3-left-align"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </div>
+            <div class="w3-third w3-auto w3-margin-top w3-xxxlarge w3-black w3-show-small w3-hide-large w3-hide-medium w3-center">
+                <a href="/pairing" class="w3-button"><i class="fas fa-user-plus"></i></a>
+                <a href="/setup/easy" class="w3-button"><i class="fas fa-globe-americas"></i></a>
+                <a href="/por/wifi" class="w3-button"><i class="fas fa-parking"></i></a>
+                <a href="/logout" class="w3-button"><i class="fas fa-sign-out-alt"></i></a>
+            </div>
+            <div class="easy-setup w3-rest w3-container">
+                <div class="w3-container w3-card w3-indigo w3-margin-top">
+                    <h1>Network</h1>
+                </div>
+                <div id="loading" class="loading w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>Por configuration apply, wireless will disconnect.</p>
+                    <p><i class="w3-jumbo w3-spin fa fa-refresh"></i>Please wait about 40s and reload page.</p>
+                </div>
+                <div id="success" class="success w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>
+                        <i class="w3-jumbo fas fa-rocket"></i>
+                        <i class="w3-jumbo fas fa-glass-cheers"></i>
+                        Por configuration apply success.
+                    </p>
+                </div>
+                <div id="fail" class="fail w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>
+                        <i class="w3-jumbo fas fa-skull-crossbones"></i>
+                        <i class="w3-jumbo far fa-thumbs-down"></i>
+                        Por configuration apply fail.
+                    </p>
+                </div>
+                <form id="myForm" action="/setup/easy" method="post"
+                    class="w3-container w3-card w3-dark-gray">
+                    <div id="wan_type" class="w3-panel w3-border w3-margin-top">
+                        <div id="wan_type" class="w3-panel w3-green">
+                            <h2 class="w3-left">WAN</h2>
+                        </div>
+                        <div id="wan_type" class="w3-container w3-margin w3-center">
+                            <input id="wan_type_dhcp" class="w3-radio" type="radio" name="wan_type" value=0>
+                            <label>DHCP</label>
+                            <input id="wan_type_pppoe" class="w3-radio" type="radio" name="wan_type" value=1>
+                            <label>PPPoE</label>
+                        </div>
+                        <div id="wan_pppoe" class="wan_pppoe w3-panel">
+                            <h4 class="w3-left">WAN/PPPoE</h4>
+                            <input id="wan_username" name="wan_username" class="wan_username w3-input w3-margin-top w3-center" placeholder="Username" type="text" maxlength="128">
+                            <input id="wan_password" name="wan_password" class="wan_password w3-input w3-margin-top w3-center" placeholder="Password" type="password" maxlength="128">
+                        </div>
+                    </div>
+                    <div id="wifi_private" class="wifi_private w3-panel w3-border w3-margin-top">
+                        <div id="wan_type" class="w3-panel w3-green">
+                            <h2 class="w3-left">WIFI/Private</h2>
+                        </div>
+                        <div id="wan_type" class="w3-container w3-margin-top">
+                            <input id="wifi_ssid" name="wifi_ssid" class="wifi_ssid w3-input w3-center" placeholder="SSID" type="text" maxlength="32">
+                        </div>
+                        <div id="wan_type" class="w3-container w3-margin-top">
+                            <input id="wifi_password" name="wifi_password" class="wifi_password w3-input w3-center" placeholder="Password" type="password" size="8" maxlength="63">
+                        </div>                                                                                                                                                                                                                                          <div class="w3-container w3-left w3-margin-top">                                                                                                                                                                                                    <input id="password_overwrite" name="password_overwrite" class="w3-check" type="checkbox" checked="checked">                                                                                                                                    <label class="w3-tooltip">Overwrite system password<span class="w3-text">(<em>as same as WIFI/private password</em>)</span></label></p>
+                        </div>
+                    </div>
+                    <div class="user-submit w3-margin-top">                                                                                                                                                                                                <button class="user-submit w3-button w3-section w3-block w3-blue w3-ripple w3-padding" id="submit">Submit</button>                                                                                                                            </div>
+                </form>
+            </div>
+        </div>
+        <script
+            src="https://code.jquery.com/jquery-3.6.0.min.js"
+            integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+            crossorigin="anonymous">
+        </script>
+        <script>
+            var getJson = {{ getJson }};
+
+            function verify_chap(str) {
+                return (/[ \t]/.test(str) == false);
+            }
+
+            function verify_wifi_ssid(str) {
+                return (/^[^!#;+\]\/"\t][^+\]\/"\t]{0,30}[^ !#;+\]\/"\t]$|^[^ !#;+\]\/"\t]$/.test(str) == true);
+            }
+
+            function verify_wifi_pwd(str) {
+                return (/^[\u0020-\u007e]{8,63}$/.test(str) == true);
+            }
+
+            $(document).ready(function () {
+                if (getJson["wan_type"] == 0) {
+                    $("#wan_type_dhcp").prop('checked', true);
+                    $("#wan_pppoe").hide();
+                } else {
+                    $("#wan_type_pppoe").prop('checked', true);
+                    $("#wan_pppoe").show();
+                }
+                $("#wan_username").val(getJson["wan_username"]);
+                $("#wan_password").val(getJson["wan_password"]);
+                $("#wifi_ssid").val(getJson["wifi_ssid"]);
+                $("#wifi_password").val(getJson["wifi_password"]);
+                $("#password_overwrite").prop('checked',
+                                (getJson["password_overwrite"] == "on") ? true : false);
+                $("#wan_type_pppoe").click(function() {
+                                $("#wan_pppoe").show();
+                            })
+                $("#wan_type_dhcp").click(function() {
+                                $("#wan_pppoe").hide();
+                            })
+
+                // ref https://docs.oracle.com/cd/E19455-01/806-0916/6ja8539e8/index.html
+                $(".wan_username").blur(function() {
+                    if (verify_chap($(this).val()) == false) {
+                        alert("A single token without embedded white space. The standard ANSI C \ escape sequence can be used to embed special characters. Use \s for the space character. Any pound sign at the beginning of the string must be escaped (\#) to avoid interpretation as a comment. A NULL (\0) truncates the string");
+                    }
+                });
+                $(".wan_password").blur(function() {
+                    if (verify_chap($(this).val()) == false) {
+                        alert("A single token without embedded white space. The standard ANSI C \ escape sequence can be used to embed special characters. Use \s for the space character. Any pound sign at the beginning of the string must be escaped (\#) to avoid interpretation as a comment. A NULL (\0) truncates the string");
+                    }
+                });
+                // ref from https://stackoverflow.com/questions/45249961/javascript-validate-ssid-and-wpa-wpa2
+                $(".wifi_ssid").blur(function() {
+                    if (verify_wifi_ssid($(this).val()) == false) {
+                        alert("The SSID can consist of up to 32 alphanumeric, case-sensitive, characters. The first character cannot be the !, #, or ; character. The +, ], /, \", TAB, and trailing spaces are invalid characters for SSIDs");
+                    }
+                });
+                $(".wifi_password").blur(function() {
+                    if (verify_wifi_pwd($(this).val()) == false) {
+                        alert("8 to 63 printable ASCII characters, with encoding ranging from 32 to 126");
+                    }
+                });
+
+                const myForm = $("#myForm");
+                $(".easy-setup .user-submit").click(function() {
+                    if (verify_wifi_ssid($(".wifi_ssid").val())
+                            && verify_wifi_pwd($(".wifi_password").val())) {
+                        if (($('#state').is(":checked") == false) ||
+                                (verify_chap($(".wan_username").val())
+                                && verify_chap($(".wan_password").val()))) {
+                            $("#loading").show();
+                            myForm.submit();
+                        } else {
+                            alert("PPPoE username or password format invalid");
+                        }
+                    } else {
+                        alert("WIFI SSID or password format invalid");
+                    }
+                })
+            });
+        </script>
+    </body>
+</html>

@@ -1,0 +1,25 @@
+[core]
+#wallet_address = "CHANGEME"
+#mac_address = "CHANGEME"
+#serial_number = "CHANGEME"
+sku = "TW"
+#user_wallet = "CHANGE"
+
+[network]
+wan_type = 0
+#wan_username = "CHANGEME"
+#wan_password = "CHANGEME"
+#wifi_ssid = "CHANGEME"
+#wifi_password = "CHANGEME"
+password_overwrite = "on"
+
+[por]
+state = false
+#nickname = "CHANGEME"
+
+[boss]
+#access_token = "CHANGEME"
+#ap_access_token = "CHANGEME"
+
+[aws]
+#auth_token = "CHANGEME"

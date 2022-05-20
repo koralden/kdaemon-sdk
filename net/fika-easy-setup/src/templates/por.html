@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+    <title>Easy-setup/PoR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.2/css/all.min.css">
+    <body class="w3-blue-gray">
+        <div class="w3-bar w3-teal">
+            <a href="https://koralden.com" class="w3-bar-item w3-hover-green">Koralden</a>
+            <a href="/about" class="w3-bar-item w3-hover-green w3-right">About</a>
+            <a href="/terms" class="w3-bar-item w3-hover-green w3-right">Terms</a>
+            <a href="/privacy" class="w3-bar-item w3-hover-green w3-right">Privacy</a>
+        </div>
+        <div class="w3-row">
+            <div class="w3-third w3-auto w3-margin-top w3-xlarge w3-black w3-hide-small w3-show-large w3-show-medium">
+                <a href="/pairing" class="w3-button w3-block w3-left-align"><i class="fas fa-user-plus"></i> Pairing</a>
+                <a href="/setup/easy" class="w3-button w3-block w3-left-align"><i class="fas fa-globe-americas"></i> Network</a>
+                <a href="/por/wifi" class="w3-button w3-block w3-left-align"><i class="fas fa-parking"></i> PoR</a>
+                <a href="/logout" class="w3-button w3-block w3-left-align"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </div>
+            <div class="w3-third w3-auto w3-margin-top w3-xxxlarge w3-black w3-show-small w3-hide-large w3-hide-medium w3-center">
+                <a href="/pairing" class="w3-button"><i class="fas fa-user-plus"></i></a>
+                <a href="/setup/easy" class="w3-button"><i class="fas fa-globe-americas"></i></a>
+                <a href="/por/wifi" class="w3-button"><i class="fas fa-parking"></i></a>
+                <a href="/logout" class="w3-button"><i class="fas fa-sign-out-alt"></i></a>
+            </div>
+            <div class="w3-rest w3-container">
+                <div class="w3-container w3-card w3-indigo w3-margin-top">
+                    <h1>PoR Service</h1>
+                </div>
+                <div id="loading" class="loading w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>Por configuration apply, wireless will disconnect.</p>
+                    <p><i class="w3-jumbo w3-spin fa fa-refresh"></i>Please wait about 40s and reload page.</p>
+                </div>
+                <div id="success" class="success w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>
+                        <i class="w3-jumbo fas fa-rocket"></i>
+                        <i class="w3-jumbo fas fa-glass-cheers"></i>
+                        Por configuration apply success.
+                    </p>
+                </div>
+                <div id="fail" class="fail w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>
+                        <i class="w3-jumbo fas fa-skull-crossbones"></i>
+                        <i class="w3-jumbo far fa-thumbs-down"></i>
+                        Por configuration apply fail or just timeout(maybe reloading again).
+                    </p>
+                </div>
+                <form class="w3-container w3-card-4 w3-dark-gray">
+                    <div class="w3-container w3-margin-top">
+                        <input id="state" class="w3-check" type="checkbox">
+                        <label>Enable K-Public WIFI</label>
+                    </div>
+                    <div class="w3-container w3-margin-top">
+                        <label>NickName: </label>
+                        <input id="nickname" name="nickname" class="w3-input w3-center" placeholder="Nick-Name" type="text" maxlength="20">
+                    </div>
+                    <div class="user-submit w3-container w3-margin-top">
+                        <button id="submit" class="w3-button w3-section w3-blue w3-ripple w3-padding w3-block">Submit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"
+            integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+            crossorigin="anonymous">
+        </script>
+
+        <script>
+            var getJson = {{ getJson }};
+
+            $(document).ready(function () {
+                $("#state").prop('checked', getJson["state"]);
+                $("#nickname").val(getJson["nickname"]);
+
+                $('#submit').on('click', function (event) {
+                    event.preventDefault();
+
+                    var dataJSON = {};
+                    dataJSON["state"] = $('#state').is(":checked");
+                    dataJSON["nickname"] = $('#nickname').val();
+
+                    $("#loading").show();
+                    $.ajax({
+                        type: 'POST',
+                        url: '/por/wifi',
+                        dataType: "json",
+                        contentType: "application/json;charset=utf-8",
+                        data: JSON.stringify(dataJSON),
+                        success: function (resp) {
+                            $("#loading").hide();
+                            $("#success").show();
+                        },
+                        error: function () {
+                            $("#loading").hide();
+                            $("#fail").show();
+                        },
+                        dataType: 'html',
+                    });
+                });
+            });
+        </script>
+    </body>
+</html>

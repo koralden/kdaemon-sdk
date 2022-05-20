@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+#
+#
+
+#USE_PROCD=1
+START=97
+STOP=10
+
+start() {
+	printf "Checking REDIS: "
+        tries=1
+        while sleep 1; do
+            [ "PONG" = "$(redis-cli PING)" ] && echo "ready to go" && break
+            [ $tries -eq 10 ] && echo "timeout(10s) FAIL" && exit 127
+            tries=$(expr $tries + 1)
+            printf "."
+        done
+        if ! fika-manager activate; then
+            printf "[kdaemon] activation FAIL";
+            exit 127
+        fi
+	printf "Starting fika-manager: "
+        # network setup need fika-manager ready
+	#. /lib/functions/network.sh
+	#network_is_up wan || { echo "FAIL due to wan not ready"; exit 127 }
+        start-stop-daemon -S -q -c root:root -b \
+		-x /usr/bin/fika-manager -- daemon
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+stop() {
+	printf "Stopping fika-manager: "
+	killall -KILL fika-manager
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+restart() {
+	stop
+	start
+}

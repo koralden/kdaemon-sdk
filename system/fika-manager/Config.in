@@ -1,0 +1,7 @@
+config BR2_PACKAGE_FIKA_MANAGER
+	bool "fika-manager"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_HOST_RUSTC
+	select BR2_PACKAGE_JQ
+	help
+	  Fikapark core manager for longdong project

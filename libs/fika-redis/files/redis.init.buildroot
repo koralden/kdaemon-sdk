@@ -1,0 +1,34 @@
+#!/bin/sh /etc/rc.common
+#
+# start redis
+#
+
+START=50
+STOP=50
+
+start() {
+	[ -e /etc/fika-redis.conf ] || cp /etc/fika-redis.conf.sample /etc/fika-redis.conf
+	printf "Starting fika-redis: "
+        conf=/etc/fika-redis.conf
+        dir=$(awk '/^dir/ {print $2}' $conf)
+        prefix=$(awk -F\" '/^appendfilename/ {print $2}' $conf)
+        aofdir=$(awk -F\" '/^appenddirname/ {print $2}' $conf)
+        manifest=$dir$aofdir/$prefix.manifest
+        sysctl vm.overcommit_memory=1
+	umask 077
+        [ -d $dir ] || mkdir -p $dir
+        [ -e $manifest ] \
+            && /usr/bin/redis-check-aof --fix $manifest
+	start-stop-daemon -S -q -c root:root -b \
+		-x /usr/bin/redis-server -- /etc/fika-redis.conf
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+stop() {
+	printf "Stopping fika-redis: "
+	/usr/bin/redis-cli shutdown
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+restart() {
+	stop
+	start
+}

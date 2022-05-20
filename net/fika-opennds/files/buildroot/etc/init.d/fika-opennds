@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+#
+# start redis
+#
+
+#USE_PROCD=1
+START=97
+STOP=10
+
+start() {
+	. /lib/functions/network.sh
+	network_get_ipaddrs guestIp kguest
+        grep -q "^fasremoteip $guestIp" /etc/opennds/longdong.conf || \
+            sed "s,^fasremoteip.*$,fasremoteip $guestIp," /etc/opennds/longdong.conf
+	printf "Starting fika-opennds: "
+	umask 077
+	start-stop-daemon -S -q -c root:root -b \
+		-x /usr/bin/opennds -- \
+                -c /etc/opennds/longdong.conf
+
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+stop() {
+	printf "Stopping fika-opennds: "
+	killall -KILL opennds
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+restart() {
+	stop
+	start
+}
