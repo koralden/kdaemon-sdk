@@ -20,9 +20,12 @@ PKG_LICENSE:=OpenSSL ISC
 PKG_LICENSE_FILES:=LICENSE
 PKG_BUILD_DEPENDS:=golang/host
 
+FEED_PACKAGE_DIR:=$(TOPDIR)/feeds/packages
+FEED_PACKAGE_LANG_DIR:=$(FEED_PACKAGE_DIR)/lang
+
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
-include ../../lang/golang/golang-values.mk
+include $(FEED_PACKAGE_LANG_DIR)/golang/golang-values.mk
 
 define Package/aws-iot-device-sdk-cpp
 	SECTION:=libs

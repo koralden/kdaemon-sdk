@@ -10,11 +10,14 @@ PKG_HASH:=631dc8dd10f9ecdc7a0af9b89a8739ce631b76c1de6223208437db414a2bdfc1
 PKG_MAINTAINER:=Yellow Huang <yellow.huang@fikapark.com>
 PKG_LICENSE:=MIT
 
-include ../pypi.mk
+FEED_PACKAGE_DIR:=$(TOPDIR)/feeds/packages
+FEED_PACKAGE_LANG_DIR:=$(FEED_PACKAGE_DIR)/lang
+
+include $(FEED_PACKAGE_LANG_DIR)/python/pypi.mk
 include $(INCLUDE_DIR)/package.mk
 #include $(INCLUDE_DIR)/cmake.mk
-include ../python3-package.mk
-include ../../golang/golang-values.mk
+include $(FEED_PACKAGE_LANG_DIR)/python/python3-package.mk
+include $(FEED_PACKAGE_LANG_DIR)/golang/golang-values.mk
 PKG_BUILD_DEPENDS:=golang/host perl/host boringssl
 
 define Package/python3-awscrt
@@ -39,4 +42,4 @@ TARGET_LDFLAGS += -L$(STAGING_DIR)/usr/lib/boringssl -lssl -lcrypto
 
 $(eval $(call Py3Package,python3-awscrt))
 $(eval $(call BuildPackage,python3-awscrt))
-$(eval $(call BuildPackage,python3-awscrt-src))
+#$(eval $(call BuildPackage,python3-awscrt-src))

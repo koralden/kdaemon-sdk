@@ -10,9 +10,12 @@ PKG_HASH:=41cdcad04f2bfadaf8231b9a02eebfb85e3d6ecb6cbec2441c0fda6ca323871e
 PKG_MAINTAINER:=Yellow Huang <yellow.huang@fikapark.com>
 PKG_LICENSE:=MIT
 
-include ../pypi.mk
+FEED_PACKAGE_DIR:=$(TOPDIR)/feeds/packages
+FEED_PACKAGE_LANG_DIR:=$(FEED_PACKAGE_DIR)/lang
+
+include $(FEED_PACKAGE_LANG_DIR)/python/pypi.mk
 include $(INCLUDE_DIR)/package.mk
-include ../python3-package.mk
+include $(FEED_PACKAGE_LANG_DIR)/python/python3-package.mk
 
 define Package/python3-awsiotsdk
   SUBMENU:=Python
