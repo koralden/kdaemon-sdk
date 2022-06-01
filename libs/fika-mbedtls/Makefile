@@ -7,12 +7,12 @@
 
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=mbedtls
+PKG_NAME:=fika-mbedtls
 PKG_VERSION:=2.28.0
 PKG_RELEASE:=$(AUTORELEASE)
 PKG_USE_MIPS16:=0
 
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE:=mbedtls-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/ARMmbed/mbedtls/tar.gz/v$(PKG_VERSION)?
 PKG_HASH:=6519579b836ed78cc549375c7c18b111df5717e86ca0eeff4cb64b2674f424cc
 
@@ -24,21 +24,23 @@ PKG_CONFIG_DEPENDS := \
 	CONFIG_LIBMBEDTLS_DEBUG_C \
 	CONFIG_LIBMBEDTLS_HKDF_C
 
+PKG_BUILD_DIR := $(BUILD_DIR)/mbedtls$(if $(PKG_VERSION),-$(PKG_VERSION))
+
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
 
-define Package/mbedtls/Default
+define Package/fika-mbedtls/Default
   TITLE:=Embedded SSL
   URL:=https://tls.mbed.org
 endef
 
-define Package/mbedtls/Default/description
+define Package/fika-mbedtls/Default/description
 The aim of the mbedtls project is to provide a quality, open-source
 cryptographic library written in C and targeted at embedded systems.
 endef
 
-define Package/libmbedtls
-$(call Package/mbedtls/Default)
+define Package/libfika-mbedtls
+$(call Package/fika-mbedtls/Default)
   SECTION:=libs
   CATEGORY:=Libraries
   SUBMENU:=SSL
@@ -46,9 +48,9 @@ $(call Package/mbedtls/Default)
   ABI_VERSION:=12
 endef
 
-define Package/libmbedtls/config
+define Package/libfika-mbedtls/config
 config LIBMBEDTLS_DEBUG_C
-	depends on PACKAGE_libmbedtls
+	depends on PACKAGE_libfika-mbedtls
 	bool "Enable debug functions"
 	default n
 	help
@@ -60,7 +62,7 @@ config LIBMBEDTLS_DEBUG_C
 	 Usually, you don't need this, so don't select this if you're unsure.
 
 config LIBMBEDTLS_HKDF_C
-	depends on PACKAGE_libmbedtls
+	depends on PACKAGE_libfika-mbedtls
 	bool "Enable the HKDF algorithm (RFC 5869)"
 	default n
 	help
@@ -68,21 +70,21 @@ config LIBMBEDTLS_HKDF_C
 	 (HMAC)-based key derivation function (HKDF).
 endef
 
-define Package/mbedtls-util
+define Package/fika-mbedtls-util
 $(call Package/mbedtls/Default)
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE+= (utilities)
-  DEPENDS:=+libmbedtls
+  DEPENDS:=+libfika-mbedtls
 endef
 
-define Package/libmbedtls/description
-$(call Package/mbedtls/Default/description)
+define Package/libfika-mbedtls/description
+$(call Package/fika-mbedtls/Default/description)
 This package contains the mbedtls library.
 endef
 
-define Package/mbedtls-util/description
-$(call Package/mbedtls/Default/description)
+define Package/fika-mbedtls-util/description
+$(call Package/fika-mbedtls/Default/description)
 This package contains mbedtls helper programs for private key and
 CSR generation (gen_key, cert_req)
 endef
@@ -126,18 +128,18 @@ define Build/InstallDev
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/lib*.a $(1)/usr/lib/
 endef
 
-define Package/libmbedtls/install
+define Package/libfika-mbedtls/install
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/lib*.so.* $(1)/usr/lib/
 	#TODO, yellow@fika, workaround to pass aws-iot-device-sdk-embedded-C
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libmbedtls.so.$(PKG_VERSION) $(1)/usr/lib/libmbedtls.so
 endef
 
-define Package/mbedtls-util/install
+define Package/fika-mbedtls-util/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/gen_key $(1)/usr/bin/
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/cert_req $(1)/usr/bin/
 endef
 
-$(eval $(call BuildPackage,libmbedtls))
-$(eval $(call BuildPackage,mbedtls-util))
+$(eval $(call BuildPackage,libfika-mbedtls))
+$(eval $(call BuildPackage,fika-mbedtls-util))
