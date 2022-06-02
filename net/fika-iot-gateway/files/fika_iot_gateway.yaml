@@ -1,0 +1,25 @@
+redis :
+  server  : 127.0.0.1
+  port    : 6379
+  subscribe :
+    - topic : hw/manufacture
+    - topic : fw
+    - topic : fw/statistics
+    - topic : activation
+    - topic : guest/control
+    - topic : challenge/report
+
+aws   :
+  endpoint  : "a1v9khdje2rkn9-ats.iot.us-east-1.amazonaws.com"
+  port      : 8883
+  cert      : "/etc/fika_iot_gateway/e749408131b357ef9e051f31ffe661540480ff7269fe88f62bc86bc1e4020787-certificate.pem.crt"
+  key       : "/etc/fika_iot_gateway/e749408131b357ef9e051f31ffe661540480ff7269fe88f62bc86bc1e4020787-private.pem.key"
+  ca        : "/etc/fika_iot_gateway/AmazonRootCA1.pem"
+  thing     : "longdongThing1"
+
+  subscribe :
+    - topic : remote/manage
+    - topic : challenge/deploy
+    - topic : guest/policy
+
+

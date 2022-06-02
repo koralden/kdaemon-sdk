@@ -43,6 +43,7 @@ target_link_libraries(
         openssl_posix
         hiredis
         uv
+        yaml
         OpenSSL::SSL
 )
 

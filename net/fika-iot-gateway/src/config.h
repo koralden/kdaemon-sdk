@@ -78,35 +78,35 @@
  * @brief The name of the MQTT library used and its version, following an "@"
  * symbol.
  */
+#ifndef TEST_X86
 #include <aws/core_mqtt.h>
 #define MQTT_LIB    "core-mqtt@" MQTT_LIBRARY_VERSION
+#endif
 
-/*typedef enum {
-    CONFIG_T_REDIS_SERVER       = 0,
-    CONFIG_T_REDIS_PORT,
+#include "list.h"
 
-    CONFIG_T_AWS_ENDPOINT,
-    CONFIG_T_AWS_PORT,
+#define TOPIC_MAX_LEN   128
 
-    CONFIG_T_AWS_KEY,
-    CONFIG_T_AWS_CERT,
-    CONFIG_T_AWS_CA,
-    CONFIG_T_AWS_THING,
-} CONFIG_T;*/
+typedef struct {
+    struct list_head lnode;
+    char name[TOPIC_MAX_LEN];
+} topic_node_t;
 
 typedef struct {
     char *config;
 
-    char *redis_server;
+    char redis_server[128];
     int redis_port;
+    struct list_head redis_topics;
 
-    char *aws_endpoint;
+    char aws_endpoint[64];
     int aws_port;
 
-    char *aws_key;
-    char *aws_cert;
-    char *aws_ca;
-    char *aws_thing;
+    char aws_key[256];
+    char aws_cert[256];
+    char aws_ca[256];
+    char aws_thing[128];
+    struct list_head aws_topics;
 } config_option_t;
 
 config_option_t *config_init(int argc, char **argv);
