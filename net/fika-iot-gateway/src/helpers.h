@@ -30,17 +30,6 @@
 #include <aws/core_mqtt.h>
 
 /**
- * @brief Establish a MQTT connection.
- *
- * @param[in] appCallback The callback function used to receive incoming
- * publishes and incoming acks from MQTT library.
- *
- * @return EXIT_SUCCESS if an MQTT session is established;
- * EXIT_FAILURE otherwise.
- */
-int32_t EstablishMqttSession( MQTTEventCallback_t eventCallback );
-
-/**
  * @brief Handle the incoming packet if it's not related to the device shadow.
  *
  * @param[in] pPacketInfo Packet Info pointer for the incoming packet.
@@ -107,5 +96,6 @@ int32_t aws_topic_publish( const char * pTopicFilter,
         const char * pPayload,
         size_t payloadLength );
 void aws_process_task(/*uv_idle_t *h*/void *priv);
+int aws_mqtt_establish(MQTTEventCallback_t eventCallback, void *cfg);
 
 #endif /* ifndef SHADOW_DEMO_HELPERS_H_ */

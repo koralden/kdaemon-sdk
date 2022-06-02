@@ -20,8 +20,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef DEMO_CONFIG_H_
-#define DEMO_CONFIG_H_
+#ifndef _FIKA_CONFIG_H_
+#define _FIKA_CONFIG_H_
 
 /**************************************************/
 /******* DO NOT CHANGE the following order ********/
@@ -47,97 +47,6 @@
 #include "logging_stack.h"
 
 /************ End of logging configuration ****************/
-
-
-/**
- * @brief Details of the MQTT broker to connect to.
- *
- * This is the Thing's Rest API Endpoint for AWS IoT.
- *
- * @note Your AWS IoT Core endpoint can be found in the AWS IoT console under
- * Settings/Custom Endpoint, or using the describe-endpoint API.
- *
- * #define AWS_IOT_ENDPOINT               "...insert here..."
- */
- #define AWS_IOT_ENDPOINT               "a1v9khdje2rkn9-ats.iot.us-east-1.amazonaws.com"
-
-/**
- * @brief AWS IoT MQTT broker port number.
- *
- * In general, port 8883 is for secured MQTT connections.
- *
- * @note Port 443 requires use of the ALPN TLS extension with the ALPN protocol
- * name. When using port 8883, ALPN is not required.
- */
-#define AWS_MQTT_PORT    ( 8883 )
-
-/**
- * @brief Path of the file containing the server's root CA certificate.
- *
- * This certificate is used to identify the AWS IoT server and is publicly
- * available. Refer to the AWS documentation available in the link below
- * https://docs.aws.amazon.com/iot/latest/developerguide/server-authentication.html#server-authentication-certs
- *
- * Amazon's root CA certificate is automatically downloaded to the certificates
- * directory from @ref https://www.amazontrust.com/repository/AmazonRootCA1.pem
- * using the CMake build system.
- *
- * @note This certificate should be PEM-encoded.
- * @note This path is relative from the demo binary created. Update
- * ROOT_CA_CERT_PATH to the absolute path if this demo is executed from elsewhere.
- */
-#ifndef ROOT_CA_CERT_PATH
-    #define ROOT_CA_CERT_PATH    "/etc/fika_iot_gateway/AmazonRootCA1.pem" /* TODO */
-#endif
-
-/**
- * @brief Path of the file containing the client certificate.
- *
- * Refer to the AWS documentation below for details regarding client
- * authentication.
- * https://docs.aws.amazon.com/iot/latest/developerguide/client-authentication.html
- *
- * @note This certificate should be PEM-encoded.
- *
- * #define CLIENT_CERT_PATH    "...insert here..."
- */
- #define CLIENT_CERT_PATH    "/etc/fika_iot_gateway/e749408131b357ef9e051f31ffe661540480ff7269fe88f62bc86bc1e4020787-certificate.pem.crt" /* TODO */
-
-/**
- * @brief Path of the file containing the client's private key.
- *
- * Refer to the AWS documentation below for details regarding client
- * authentication.
- * https://docs.aws.amazon.com/iot/latest/developerguide/client-authentication.html
- *
- * @note This private key should be PEM-encoded.
- *
- * #define CLIENT_PRIVATE_KEY_PATH    "...insert here..."
- */
- #define CLIENT_PRIVATE_KEY_PATH    "/etc/fika_iot_gateway/e749408131b357ef9e051f31ffe661540480ff7269fe88f62bc86bc1e4020787-private.pem.key" /* TODO */
-
-/**
- * @brief Predefined thing name.
- *
- * This is the predefined thing name and could be compiled in ROM code.
- */
-#ifndef THING_NAME
-    #define THING_NAME    "longdongThing1" /* TODO */
-#endif
-
-/**
- * @brief MQTT client identifier.
- *
- * No two clients may use the same client identifier simultaneously.
- *
- * @note The client identifier should match the Thing name per
- * AWS IoT Security best practices:
- * https://docs.aws.amazon.com/iot/latest/developerguide/security-best-practices.html
- * However, it is not required for the demo to run.
- */
-#ifndef CLIENT_IDENTIFIER
-    #define CLIENT_IDENTIFIER    THING_NAME
-#endif
 
 /**
  * @brief Size of the network buffer for MQTT packets.
@@ -172,19 +81,34 @@
 #include <aws/core_mqtt.h>
 #define MQTT_LIB    "core-mqtt@" MQTT_LIBRARY_VERSION
 
-/**
- * @brief Predefined shadow name.
- *
- * Defaults to unnamed "Classic" shadow. Change to a custom string to use a named shadow.
- */
-#ifndef SHADOW_NAME
-    //TODO #define SHADOW_NAME    SHADOW_NAME_CLASSIC
-    #define SHADOW_NAME    "nms:hw:manufacture"
-#endif
+/*typedef enum {
+    CONFIG_T_REDIS_SERVER       = 0,
+    CONFIG_T_REDIS_PORT,
 
-/**
- * @brief The length of #SHADOW_NAME.
- */
-#define SHADOW_NAME_LENGTH    ( ( uint16_t ) ( sizeof( SHADOW_NAME ) - 1 ) )
+    CONFIG_T_AWS_ENDPOINT,
+    CONFIG_T_AWS_PORT,
 
-#endif /* ifndef DEMO_CONFIG_H_ */
+    CONFIG_T_AWS_KEY,
+    CONFIG_T_AWS_CERT,
+    CONFIG_T_AWS_CA,
+    CONFIG_T_AWS_THING,
+} CONFIG_T;*/
+
+typedef struct {
+    char *config;
+
+    char *redis_server;
+    int redis_port;
+
+    char *aws_endpoint;
+    int aws_port;
+
+    char *aws_key;
+    char *aws_cert;
+    char *aws_ca;
+    char *aws_thing;
+} config_option_t;
+
+config_option_t *config_init(int argc, char **argv);
+
+#endif /* ifndef _FIKA_CONFIG_H_ */
