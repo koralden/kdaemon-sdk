@@ -47,7 +47,7 @@ endef
 #endef
 
 define Package/fika-iot-gateway/conffiles
-/etc/fika_iot_gateway/fiak_iot_gateway.yaml
+/etc/fika_iot_gateway/fika_iot_gateway.yaml
 endef
 
 define Package/fika-iot-gateway/install
