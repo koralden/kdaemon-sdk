@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html itemscope itemtype="https://schema.org/Product">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, shrink-to-fit=no"
+    />
+
+    <title>QR Code - OTP Pairing</title>
+    <meta name="title" content="QR Code - OTP Pairing" />
+    <meta
+      name="description"
+      content="QR Code - OTP Pairing"
+    />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://qrcode.show/" />
+    <meta name="twitter:title" content="Generate & Show QR Code" />
+    <meta
+      name="twitter:description"
+      content="QR Code - OTP Pairing"
+    />
+    <meta
+      name="twitter:image"
+      content="__res__/social.jpg"
+    />
+    <meta name="twitter:site" content="https://QRcode.show" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://qrcode.show/" />
+    <meta property="og:title" content="Generate & Show QR Code" />
+    <meta
+      property="og:description"
+      content="QR Code - OTP Pairing"
+    />
+    <meta
+      property="og:image"
+      content="__res__/social.jpg"
+    />
+    <meta
+      property="og:image:alt"
+      content="QR Code - OTP Pairing"
+    />
+
+    <meta itemprop="name" content="Generate & Show QR Code" />
+    <meta
+      itemprop="description"
+      content="QR Code - OTP Pairing"
+    />
+
+    <link
+      rel="apple-touch-icon"
+      sizes="57x57"
+      href="__res__/icons/apple-icon-57x57.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="60x60"
+      href="__res__/icons/apple-icon-60x60.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="72x72"
+      href="__res__/icons/apple-icon-72x72.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="76x76"
+      href="__res__/icons/apple-icon-76x76.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="114x114"
+      href="__res__/icons/apple-icon-114x114.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="120x120"
+      href="__res__/icons/apple-icon-120x120.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="144x144"
+      href="__res__/icons/apple-icon-144x144.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="152x152"
+      href="__res__/icons/apple-icon-152x152.png"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="__res__/icons/apple-icon-180x180.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="__res__/icons/android-icon-192x192.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="__res__/icons/favicon-32x32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="96x96"
+      href="__res__/icons/favicon-96x96.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="__res__/icons/favicon-16x16.png"
+    />
+    <link rel="manifest" href="manifest.json" />
+    <meta name="msapplication-TileColor" content="#ffffff" />
+    <meta
+      name="msapplication-TileImage"
+      content="__res__/ms-icon-144x144.png"
+    />
+    <meta name="theme-color" content="#ffffff" />
+
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+      @media print {
+        #help *,
+        #demo *,
+        #qrcontrols *,
+        #form * {
+          display: none;
+        }
+      }
+
+      body,
+      video,
+      button {
+        max-width: 840px;
+        margin: auto;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: x-large;
+        line-height: 1.5;
+        height: auto;
+      }
+
+      body {
+        padding: 5px;
+      }
+
+      video {
+        max-width: 100%;
+      }
+
+      #qrcontrols,
+      #qrcontrols button {
+        text-align: center;
+        font-size: normal;
+        line-height: 1;
+      }
+
+      #qr {
+        text-align: center;
+      }
+
+      .title {
+        text-align: center;
+        font-size: xx-large;
+      }
+
+      .description {
+        text-align: center;
+      }
+
+      #help {
+        text-align: left;
+        overflow: auto;
+      }
+
+      #otp {
+        min-width: 100%;
+        max-width: 100%;
+        padding: 5px;
+        -moz-box-sizing: border-box;
+        -ms-box-sizing: border-box;
+        -webkit-box-sizing: border-box;
+        box-sizing: border-box;
+      }
+
+      #submit {
+        min-width: 100%;
+        max-width: 100%;
+        margin: 0;
+      }
+
+      #printarea #qrcontrols {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="content">
+      <div id="printarea">
+        <div id="qr">{{ content }}</div>
+
+        <div id="qrcontrols"><button id="print">Print</button></div>
+
+        <p contenteditable="true" class="title"><b>SCAN</b> this</p>
+        <p contenteditable="true" class="description">
+          And then keyin the same OTP you received
+        </p>
+      </div>
+
+      <div id="form">
+        <textarea id="otp" required="required"></textarea>
+        <button id="submit">Confirm</button>
+      </div>
+
+      <br />
+
+      <div id="demo"></div>
+
+      <div id="help">
+          <!--<h3>❯ curl qrcode.show</h3>-->
+        <pre>{{ help }}</pre>
+      </div>
+    </div>
+
+    <script
+      src="https://code.jquery.com/jquery-3.6.0.min.js"
+      integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+      crossorigin="anonymous"
+    ></script>
+
+    <script>
+      $(document).ready(function () {
+        $('#print').on('click', function (event) {
+          window.print();
+        });
+
+        /*let demos = ['demo.mp4', 'lets-be-nice.mp4'];
+        let randvideo = demos[Math.ceil(Math.random() * 10) % demos.length];
+        $('#demo').html(`
+          <video controls>
+            <source
+              src="__res__/${randvideo}"
+              type="video/mp4"
+            />
+          </video>
+        `);*/
+
+        $('#submit').on('click', function (event) {
+          event.preventDefault();
+
+          $('#qr').html(
+            '<img src="https://via.placeholder.com/360/fff/000/?text=Loading..." height="360" width="360" />'
+          );
+          $('#qrcontrols').hide();
+
+          /* ref: http://www.jysblog.com/coding/web/js-%E5%88%A9%E7%94%A8ajax%E7%99%BC%E5%87%BApost%E8%AB%8B%E6%B1%82%EF%BC%8C%E4%B8%A6%E4%BD%BF%E7%94%A8json%E5%85%A7%E5%AE%B9%E6%A0%BC%E5%BC%8F/ */
+          var dataJSON = {};
+          dataJSON["otp"] = $('#otp').val();
+
+          $.ajax({
+            type: 'POST',
+            url: '/pairing',
+            dataType: "json",
+            contentType: "application/json;charset=utf-8",
+            data: JSON.stringify(dataJSON),
+            success: function (resp) {
+              $('#content').html(resp);
+            },
+            error: function () {
+              $('#qr').html(
+                '<img src="https://via.placeholder.com/360/fff/f00/?text=ERROR! Try again..." height="360" width="360" />'
+              );
+              $('#qrcontrols').hide();
+            },
+            dataType: 'html',
+          });
+        });
+
+        if ($('#qr').html() !== '') {
+          $('#qrcontrols').show();
+        }
+      });
+    </script>
+  </body>
+</html>
