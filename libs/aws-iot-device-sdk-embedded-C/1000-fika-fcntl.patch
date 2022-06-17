@@ -1,0 +1,21 @@
+--- a/demos/jobs/jobs_demo_mosquitto/jobs_demo_mosquitto.c
++++ b/demos/jobs/jobs_demo_mosquitto/jobs_demo_mosquitto.c
+@@ -1211,7 +1211,7 @@ int main( int argc,
+         exit( 1 );
+     }
+ 
+-    on_exit( teardown, h );
++    //TODO on_exit( teardown, h );
+ 
+     if( ( setup( h ) == false ) || ( connect( h ) == false ) )
+     {
+--- a/libraries/aws/ota-for-aws-iot-embedded-sdk/source/portable/os/ota_os_posix.c
++++ b/libraries/aws/ota-for-aws-iot-embedded-sdk/source/portable/os/ota_os_posix.c
+@@ -29,6 +29,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
++#include <fcntl.h>
+ 
+ /* MISRA rule 21.5 prohibits the use of signal.h because of undefined behavior. However, this
+  * implementation is on POSIX, which has well defined behavior. We're using the timer functionality

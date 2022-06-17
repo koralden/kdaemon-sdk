@@ -1,0 +1,12 @@
+config BR2_PACKAGE_FIKA_IOT_GATEWAY
+	bool "fika-iot-gateway
+	select BR2_PACKAGE_LIBUV
+	select BR2_PACKAGE_HIREDIS
+        select BR2_PACKAGE_LIBYAML
+        select BR2_PACKAGE_AWS_IOT_SDK_C
+	select BR2_PACKAGE_OPENSSL
+	help
+	  FIKA IoT Gateway in C
+	  to connect devices running C code to AWS IoT Core.
+
+	  https://github.com/koralden/longdong
