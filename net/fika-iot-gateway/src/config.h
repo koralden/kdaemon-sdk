@@ -38,10 +38,10 @@
 
 /* Logging configuration for the Demo. */
 #ifndef LIBRARY_LOG_NAME
-    #define LIBRARY_LOG_NAME     "SHADOW_DEMO"
+    #define LIBRARY_LOG_NAME     "FIKA_IOT_GATEWAY"
 #endif
 #ifndef LIBRARY_LOG_LEVEL
-    #define LIBRARY_LOG_LEVEL    LOG_INFO
+    #define LIBRARY_LOG_LEVEL    LOG_DEBUG
 #endif
 
 #include "logging_stack.h"
@@ -58,7 +58,7 @@
  * The current value is given as an example. Please update for your specific
  * operating system.
  */
-#define OS_NAME                   "Ubuntu"
+#define OS_NAME                   "OpenWrt"
 
 /**
  * @brief The version of the operating system that the application is running

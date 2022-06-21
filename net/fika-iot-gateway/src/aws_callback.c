@@ -46,6 +46,7 @@
 #include "helpers.h"
 #include "aws_callback.h"
 #include "redis_callback.h"
+#include "list.h"
 
 #define SHADOW_TOPIC_MAX_LENGTH  ( 256U )
 
@@ -560,11 +561,6 @@ static void eventCallback( MQTTContext_t * pMqttContext,
 
 /*-----------------------------------------------------------*/
 
-static void process_task(uv_idle_t *h)
-{
-    aws_process_task(NULL);
-}
-
 static aws_handle_t priv_aws_hdr;
 
 static int classic_topic_subscribe(void)
@@ -590,24 +586,134 @@ static int classic_topic_subscribe(void)
     return ret;
 }
 
-aws_handle_t *aws_init(void *event_loop, void *vcfg)
+static int iot_init(void *vcfg)
 {
-    uv_loop_t *uv_loop = (uv_loop_t *)event_loop;
-    static uv_idle_t idler;
     int ret;
 
     ret = aws_mqtt_establish(eventCallback, vcfg);
-    if (ret == EXIT_FAILURE)
-    {
+    if (ret == EXIT_FAILURE) {
         /* Log error to indicate connection failure. */
         LogError( ( "Failed to connect to MQTT broker." ) );
-        return NULL;
+        return -1;
     }
 
-    classic_topic_subscribe();
+    ret = classic_topic_subscribe();
 
-    uv_idle_init(uv_loop, &idler);
-    uv_idle_start(&idler, process_task);
+    return 0;
+}
+
+typedef struct {
+    uv_idle_t p_idle;
+    uv_timer_t p_timer;
+
+    void *extra;
+    uint64_t timer_cnt;
+    int fail_cnt;
+    int status;
+    int init_cnt;
+    int delay_time;
+} fika_idle_t;
+
+#define IOT_TIMER_LOOP_MS       600002
+static void iot_timer_loop(uv_timer_t *timer)
+{
+    /*TODO, hard code for test only */
+    fika_idle_t *idle = container_of(timer, fika_idle_t, p_timer);
+    static int first = 1;
+
+    if (first == 1) {
+        aws_shadow_publish_dynamic("provision",
+                "{\"sdk-version\":\"0.01.00\",\"ap-wallet-address\":\"not-real\"}");
+        first = 0;
+    }
+    else {
+        char payload[128];
+        int err;
+        double uptime;
+
+        uv_sleep(rand() % 5000);
+        err = uv_uptime(&uptime);
+        if (err != 0) {
+            uptime = 0;
+        }
+
+        err = snprintf(payload, sizeof(payload) - 1,
+                "{\"up-time\":\"%f\",\"latency\":30}",
+                uptime);
+        if (err > 0) {
+            payload[err + 1] = '\0';
+            aws_shadow_publish_dynamic("heartbeat", payload);
+        }
+    }
+    idle->timer_cnt++;
+
+    return;
+}
+
+static void process_task(uv_idle_t *h)
+{
+    int ret = -1;
+    fika_idle_t *idle = (fika_idle_t *)h;
+
+    if (idle->status == 1) {
+        ret = aws_process_task(NULL);
+    }
+
+    if (ret == 0) {
+        if (idle->fail_cnt != 0) {
+            idle->fail_cnt = 0;
+            idle->timer_cnt = 0;
+            idle->init_cnt = 0;
+            idle->delay_time = 500;
+
+
+            uv_timer_start(&idle->p_timer, iot_timer_loop, 2000, IOT_TIMER_LOOP_MS);
+        }
+    }
+    else {
+        idle->fail_cnt++;
+
+        /* over 1min */
+        if (idle->fail_cnt == 120) {
+
+            idle->status = -1;
+            idle->fail_cnt = 0;
+
+            uv_timer_stop(&idle->p_timer);
+            iot_init(idle->extra);
+
+            idle->init_cnt++;
+            idle->status = 1;
+
+            idle->delay_time = idle->init_cnt * 500;
+            if (idle->delay_time == 10000) {
+                idle->delay_time = 100;
+            }
+        }
+    }
+    uv_sleep(idle->delay_time);
+
+    return;
+}
+
+aws_handle_t *aws_init(void *event_loop, void *vcfg)
+{
+    uv_loop_t *uv_loop = (uv_loop_t *)event_loop;
+    static fika_idle_t idler = {
+        .status = -1,
+    };
+    int ret;
+
+    ret = iot_init(vcfg);
+
+    uv_idle_init(uv_loop, &idler.p_idle);
+    uv_timer_init(uv_loop, &idler.p_timer);
+    idler.init_cnt = 1;
+    idler.delay_time = 100;
+    idler.status = 1;
+    idler.fail_cnt = 1; /* as first time */
+    idler.extra = vcfg;
+    uv_idle_start(&idler.p_idle, process_task);
 
     memset(priv_aws_hdr.thing, 0x0, sizeof(priv_aws_hdr.thing));
     /* TODO check length? */
@@ -689,7 +795,7 @@ int aws_shadow_subscribe_dynamic(char *topic)
 #define SHADOW_JSON_TEMPLATE     \
     "{"                         \
     "\"state\":{"               \
-    "\"desired\": %s"           \
+    "\"reported\": %s"           \
     "},"                        \
     "\"clientToken\":\"%06lu\"" \
     "}"

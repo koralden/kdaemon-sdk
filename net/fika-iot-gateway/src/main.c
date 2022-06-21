@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
 /* POSIX includes. */
 #include <unistd.h>
+#include <time.h>
 
 #include <uv.h>
 #include "redis_callback.h"
@@ -20,6 +20,7 @@ int main( int argc,
     uv_loop_t *loop = uv_default_loop();
     uv_idle_t idler;
 
+    srand(time(0));
     config_option_t *cfg = config_init(argc, argv);
 
     redis_handle_t *redis_hdp = redis_init(loop,

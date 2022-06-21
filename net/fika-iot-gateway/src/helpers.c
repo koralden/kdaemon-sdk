@@ -788,7 +788,7 @@ int32_t aws_topic_publish( const char * pTopicFilter,
     return returnStatus;
 }
 
-void aws_process_task(/*uv_idle_t *h*/ void *priv)
+int aws_process_task(void *priv)
 {
     MQTTContext_t * pMqttContext = &mqttContext;
     MQTTStatus_t mqttStatus;
@@ -800,13 +800,17 @@ void aws_process_task(/*uv_idle_t *h*/ void *priv)
      * of receiving publish message before subscribe ack is zero; but application
      * must be ready to receive any packet. This demo uses MQTT_ProcessLoop to
      * receive packet from network. */
-    //mqttStatus = MQTT_ProcessLoop( pMqttContext, 0 );
-    mqttStatus = MQTT_ProcessLoop( pMqttContext, MQTT_PROCESS_LOOP_TIMEOUT_MS );
+    mqttStatus = MQTT_ProcessLoop( pMqttContext, 0 );
+    //mqttStatus = MQTT_ProcessLoop( pMqttContext, MQTT_PROCESS_LOOP_TIMEOUT_MS );
 
     if( mqttStatus != MQTTSuccess )
     {
         LogError( ( "MQTT_ProcessLoop returned with status = %u.",
                     mqttStatus ) );
+        return -1;
+    }
+    else {
+        return 0;
     }
 }
 
@@ -1042,4 +1046,8 @@ int aws_mqtt_establish(MQTTEventCallback_t eventCallback, void *vcfg)
     }
 
     return returnStatus;
+}
+
+int aws_mqtt_reconn(void)
+{
 }

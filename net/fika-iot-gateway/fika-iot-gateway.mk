@@ -19,12 +19,15 @@ FIKA_IOT_GATEWAY_CONF_OPTS = -DSDK_DIR=$(STAGING_DIR)/usr
 FIKA_IOT_GATEWAY_SUPPORTS_IN_SOURCE_BUILD = NO
 
 define MANUAL_PATCH
-	@$(call MESSAGE,"Manual Patching")
-	for D in $(FIKA_IOT_GATEWAY_PKGDIR); do \
-	  if test -d $${D}; then \
-	      $(APPLY_PATCHES) $(@D) $${D} \*.patch \*.patch.$(ARCH) || exit 1; \
-	  fi; \
-	done;
+	if ! test -e $(@D)/.MANUAL_PATCH; then \
+		@$(call MESSAGE,"Manual Patching"); \
+		for D in $(FIKA_IOT_GATEWAY_PKGDIR); do \
+		  if test -d $${D}; then \
+		      $(APPLY_PATCHES) $(@D) $${D} \*.patch \*.patch.$(ARCH) || exit 1; \
+		  fi; \
+		done; \
+		touch $(@D)/.MANUAL_PATCH; \
+	fi
 endef
 
 FIKA_IOT_GATEWAY_POST_RSYNC_HOOKS += MANUAL_PATCH

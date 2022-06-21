@@ -95,7 +95,7 @@ int32_t aws_topic_publish( const char * pTopicFilter,
         int32_t topicFilterLength,
         const char * pPayload,
         size_t payloadLength );
-void aws_process_task(/*uv_idle_t *h*/void *priv);
+int aws_process_task(void *priv);
 int aws_mqtt_establish(MQTTEventCallback_t eventCallback, void *cfg);
 
 #endif /* ifndef SHADOW_DEMO_HELPERS_H_ */
