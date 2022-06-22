@@ -15,6 +15,7 @@ if BR2_PACKAGE_LONGDONG
         source package/longdong/net/fika-iot-gateway/Config.in
         source package/longdong/net/fika-easy-setup/Config.in
         source package/longdong/net/fika-opennds/Config.in
+        source package/longdong/net/fika-manager/Config.in
 endif
 
 comment "longdong needs a toolchain w/ static library"

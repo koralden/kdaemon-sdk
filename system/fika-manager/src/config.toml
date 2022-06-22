@@ -1,0 +1,47 @@
+[core]
+database = "redis://127.0.0.1:6379"
+version = "0.1.0"
+
+[[subscribe]]
+# WAN: PPPoe & DHCP & ready
+# wireless: SSID/security
+# system: password
+topic = "easy-setup"
+path = "/etc/fika_manager/easy_setup.sh"
+
+[[subscribe]]
+# firewall for MAC-address/IP-address or advance traffic
+topic = "captive-portal"
+path = "/etc/fika_manager/captive-portal.sh"
+
+[[subscribe]]
+topic = "cmp/remote-manage"
+path = "/etc/fika_manager/remote_manage.sh"
+
+[[subscribe]]
+topic = "test"
+path = "/tmp/test.sh"
+
+[[publish]]
+topic = "provision"
+is_loop = false
+period = 0 # seconds
+path = "/etc/fika_manager/heartbeat.sh"
+
+[[publish]]
+topic = "heartbeat"
+is_loop = true
+period = 600 # seconds
+path = "/etc/fika_manager/heartbeat.sh"
+
+[[publish]]
+topic = "runtime-statistics"
+is_loop = true
+period = 600 # seconds
+path = "/etc/fika_manager/runtime_statistics.sh"
+
+[[publish]]
+topic = "maker"
+is_loop = false
+period = 0 # seconds
+path = "/etc/fika_manager/maker.sh"
