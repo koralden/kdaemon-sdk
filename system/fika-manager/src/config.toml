@@ -20,26 +20,21 @@ path = "/etc/fika_manager/remote_manage.sh"
 
 [[publish]]
 topic = "provision"
-is_loop = false
-#period = 0 # seconds
+start_at = {secs = 1, nanos = 0 } # seconds
 path = "/etc/fika_manager/provision.sh"
 
 [[publish]]
 topic = "heartbeat"
-is_loop = true
-#period = 600 # seconds
 period = {secs = 600, nanos = 0 } # seconds
 path = "/etc/fika_manager/heartbeat.sh"
 
 [[publish]]
 topic = "runtime-statistics"
-is_loop = true
-#period = 600 # seconds
+start_at = {secs = 10, nanos = 0 } # seconds
 period = {secs = 600, nanos = 0 } # seconds
 path = "/etc/fika_manager/runtime_statistics.sh"
 
 [[publish]]
 topic = "maker"
-is_loop = false
-#period = 0 # seconds
+start_at = {secs = 10, nanos = 0 } # seconds
 path = "/etc/fika_manager/maker.sh"

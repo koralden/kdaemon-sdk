@@ -1,5 +1,4 @@
 use clap::Parser;
-// import tokio fs to read file
 use anyhow::Result;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -8,16 +7,16 @@ use tokio::fs;
 use tokio::signal;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::time::{self, Duration, Instant};
-use tracing::{debug, error, info /*, instrument*/};
+use tracing::{debug, error, info, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 //use bytes::Bytes;
 use std::iter::repeat_with;
 //use futures_util::stream::stream::StreamExt;
 //use futures_util::StreamExt as _;
-use process_stream::{Process, ProcessItem, StreamExt};
+use process_stream::{Process, ProcessItem, Stream, StreamExt};
 use std::collections::{BTreeMap, HashMap};
 //use std::io;
-use std::path::{/*Path, */PathBuf};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
@@ -60,10 +59,11 @@ struct ConfigSubscribe {
 struct ConfigPublish {
     topic: String,
     path: PathBuf,
-    is_loop: bool,
+    start_at: Option<Duration>,
     period: Option<Duration>,
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 struct State {
     //publish_conn: redis::aio::Connection,
@@ -122,6 +122,7 @@ async fn conn_access_task(
     Ok(())
 }
 
+#[instrument(skip(sub_conn, shared))]
 async fn subscribe_task(
     mut sub_conn: redis::aio::PubSub,
     _chan_tx: mpsc::Sender<Command>,
@@ -147,38 +148,43 @@ async fn subscribe_task(
 
                 if let Some(path) = entries.get(&topic) {
                     debug!(
-                        "[subscribe_task] got msg {:?} => {:?}/{:?} => path-{:?}",
+                        "got msg {:?} => {:?}/{:?} => path-{:?}",
                         msg, topic, payload, path
                     );
                     let mut cmd: Process = path.into();
                     cmd.arg(&payload);
 
-                    let mut cmd_stream = cmd.spawn_and_stream()?;
-                    /*TODO, kill long-term job with static timeout */
-                    /*let worker_th = */
-                    tokio::spawn(async move {
-                        while let Some(output) = cmd_stream.next().await {
-                            if output.is_exit() {
-                                info!("Done");
-                            } else {
-                                debug!("{output}");
+                    if let Ok(cmd_stream) = cmd.spawn_and_stream() {
+                        tokio::spawn(async move {
+                            let timeout = Duration::from_secs(86400);
+                            tokio::select! {
+                                Ok(_) = capture_process_stream(
+                                    Ok(cmd_stream)) => {}
+                                _ = time::sleep(timeout) => {
+                                    error!("{} task timeout({:?}) exit", topic, timeout);
+                                    cmd.kill().await;
+                                }
+                                else => {
+                                }
                             }
-                        }
-                    });
+                        });
+                    } else {
+                        error!("cmd spawn_and_stream error!");
+                    }
                 } else {
-                    error!("[subscribe_task] topic-{:?} no path", topic);
+                    error!("topic-{:?} no path", topic);
                 }
             } else {
-                error!("[subscribe_task] not topic in msg {:?}!!", msg);
+                error!("not topic in msg {:?}!!", msg);
             }
         }
     }
     Ok(())
 }
 
-fn loop_expired_topics(
-    expirations: Arc<Mutex<BTreeMap<(Instant, u64), (String, Duration)>>>,
-) -> Option<(Instant, String)> {
+type ExpirationT = BTreeMap<(Instant, u64), (String, Option<Duration>)>;
+
+fn next_topics(expirations: Arc<Mutex<ExpirationT>>) -> Option<(Instant, String)> {
     let mut expirations = expirations.lock().unwrap();
 
     let expirations = &mut *expirations;
@@ -186,38 +192,55 @@ fn loop_expired_topics(
     while let Some((&(when, id), (topic, _))) = expirations.iter().next() {
         if when > now {
             return Some((when, topic.to_string()));
-        }
-        if let Some((topic, period)) = expirations.remove(&(when, id)) {
-            let when = now + period;
-            expirations.insert((when, id), (topic, period));
         } else {
-            debug!("[loop_expired_topics] impossible!!??");
+            if let Some((topic, Some(period))) = expirations.remove(&(when, id)) {
+                let when = now + period;
+                expirations.insert((when, id), (topic, Some(period)));
+            }
         }
     }
     None
 }
-
-async fn task_run_path_publish(
+#[instrument(skip(chan_tx))]
+async fn publish_message(
     chan_tx: mpsc::Sender<Command>,
     topic: String,
-    path: PathBuf,
+    payload: String,
 ) -> Result<()> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+
+    chan_tx
+        .send(Command::Publish {
+            key: topic.clone(),
+            val: payload,
+            resp: resp_tx,
+        })
+        .await?;
+
+    let res = resp_rx.await;
+    debug!(
+        "[publish_task][publish][{}] transmit response {:?}",
+        topic, res
+    );
+
+    Ok(())
+}
+
+#[instrument(skip(process_stream))]
+async fn capture_process_stream(
+    process_stream: Result<impl Stream<Item = ProcessItem> + Send + std::marker::Unpin>,
+) -> Result<String> {
     let mut payload = String::new();
 
-    if let Ok(mut cmd_stream) = Process::new(&path).spawn_and_stream() {
+    if let Ok(mut cmd_stream) = process_stream {
         let mut output = String::new();
         let mut error = String::new();
         while let Some(pi) = cmd_stream.next().await {
             match pi {
                 ProcessItem::Exit(e) => {
+                    /* TODO, how to know kill or error exit? */
                     debug!("Exit {e}");
 
-                    /*if e.parse::<i16>() == Ok(0) {
-                        payload.push_str(&format!(r#"{{"code":200, "output":{}}}"#, output));
-                    }
-                    else {
-                        payload.push_str(&format!(r#"{{"code":501, "error":{}}}"#, error));
-                    }*/
                     if error.len() == 0 {
                         payload.push_str(&format!(r#"{{"code":200, "output":{}}}"#, output));
                     } else {
@@ -235,50 +258,114 @@ async fn task_run_path_publish(
             }
         }
     } else {
-        error!("{} not found", path.to_string_lossy());
+        //error!("{:#?} not found", process);
         payload.push_str(r#"{"code":404, "error":"Not Found"}"#);
     }
 
-    let (resp_tx, resp_rx) = oneshot::channel();
+    Ok(payload)
+}
 
-    chan_tx
-        .send(Command::Publish {
-            key: topic.clone(),
-            val: payload.into(),
-            resp: resp_tx,
-        })
-        .await
-        .unwrap();
-    let res = resp_rx.await;
-    debug!(
-        "[publish_task][Publish][non-loop] {} response {:?}",
-        topic, res
-    );
+fn spawn_task_run_path_publish(
+    chan_tx: mpsc::Sender<Command>,
+    topic: String,
+    path: PathBuf,
+    timeout: Option<Duration>,
+) -> Result<()> {
+    let mut process = Process::new(&path);
+    if let Ok(process_stream) = process.spawn_and_stream() {
+        tokio::spawn(async move {
+            let timeout = match timeout {
+                Some(t) => t,
+                None => Duration::from_secs(86400), /* XXX 24h */
+            };
+            tokio::select! {
+                Ok(payload) = capture_process_stream(
+                    //chan_tx.clone(),
+                    //topic.to_string(),
+                    Ok(process_stream)) => {
+                    //debug!("task-{} completed", topic);
+
+                    publish_message(chan_tx, topic, payload).await?;
+                }
+                _ = time::sleep(timeout) => {
+                    error!("{} task timeout({:?}) exit", topic, timeout);
+                    process.kill().await;
+                }
+                else => {
+                }
+            }
+            /* help the rust type inferencer out, ref https://tokio.rs/tokio/tutorial/select */
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        });
+    }
+
     Ok(())
 }
 
+#[instrument(
+    //level = "info",
+    name = "publish::task",
+    skip(chan_tx, shared),
+)]
 async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) -> Result<()> {
-    let mut entries: HashMap<String, (PathBuf, bool, Option<Duration>)> = HashMap::new();
+    let mut entries: HashMap<String, (PathBuf, Option<Duration>, Option<Duration>)> =
+        HashMap::new();
     if let Ok(state) = shared.lock() {
-        //let state = shared.lock().unwrap();
-
         if let Some(ps) = &state.cfg.publish {
             for p in ps {
-                entries.insert(p.topic.clone(), (p.path.clone(), p.is_loop, p.period));
+                entries.insert(p.topic.clone(), (p.path.clone(), p.start_at, p.period));
             }
         }
     }
 
-    let mut expirations: BTreeMap<(Instant, u64), (String, Duration)> = BTreeMap::new();
+    //let mut expirations: BTreeMap<(Instant, u64), (String, Option<Duration>)> = BTreeMap::new();
+    let mut expirations: ExpirationT = BTreeMap::new();
     let now = Instant::now();
     let mut id = 1;
 
-    for (topic, (path, is_loop, period)) in &entries {
-        if *is_loop {
+    for (topic, (path, start_at, period)) in &entries {
+        match *start_at {
+            Some(start) => {
+                let when = now + start;
+                debug!(
+                    "start_at entries insert {:?} {:?}",
+                    (when, id),
+                    (topic, period)
+                );
+                expirations.insert((when, id), (topic.to_string(), *period));
+                id = id + 1;
+            }
+            None => {
+                let timeout = match *period {
+                    Some(period) => Some(period - Duration::from_millis(100)),
+                    _ => None,
+                };
+
+                /* run immediately */
+                _ = spawn_task_run_path_publish(
+                    chan_tx.clone(),
+                    topic.to_string(),
+                    path.to_path_buf(),
+                    timeout,
+                );
+
+                if let Some(period) = *period {
+                    let when = now + period;
+                    debug!(
+                        "period entries insert {:?} {:?}",
+                        (when, id),
+                        (topic, period)
+                    );
+                    expirations.insert((when, id), (topic.to_string(), Some(period)));
+                    id = id + 1;
+                }
+            }
+        }
+        /*if *is_loop {
             if let Some(period) = *period {
                 let when = now + period;
                 info!(
-                    "[publish_task][loop] insert {:?} {:?}",
+                    "entries insert {:?} {:?}",
                     (when, id),
                     (topic, period)
                 );
@@ -286,22 +373,25 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                 id = id + 1;
             }
         } else {
-            tokio::spawn(task_run_path_publish(
+            _ = spawn_task_run_path_publish(
                 chan_tx.clone(),
                 topic.to_string(),
                 path.to_path_buf(),
-            ));
-        }
+                10);
+        }*/
     }
 
     let expirations_cloned = Arc::new(Mutex::new(expirations)).clone();
     tokio::spawn(async move {
-        while let Some((when, topic)) = loop_expired_topics(expirations_cloned.clone()) {
+        while let Some((when, topic)) = next_topics(expirations_cloned.clone()) {
             tokio::select! {
                 _ = time::sleep_until(when) => {
-                    if let Some((path, _, _)) =entries.get(&topic) {
-                        tokio::spawn(task_run_path_publish(chan_tx.clone(),
-                        topic.to_string(), path.to_path_buf()));
+                    if let Some((path, _, period)) =entries.get(&topic) {
+                        _ = spawn_task_run_path_publish(
+                            chan_tx.clone(),
+                            topic.to_string(),
+                            path.to_path_buf(),
+                            *period);
                     }
                 }
             }
@@ -429,7 +519,7 @@ async fn test_toml_duration() {
     let cp = ConfigPublish {
         topic: String::from("test"),
         path: PathBuf::from("/tmp/test.sh"),
-        is_loop: true,
+        start_at: Some(Duration::from_secs(1)),
         period: Some(Duration::from_secs(10)),
     };
 
