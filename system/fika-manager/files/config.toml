@@ -3,14 +3,10 @@ database = "redis://127.0.0.1:6379"
 version = "0.1.0"
 
 [[subscribe]]
-# WAN: PPPoe & DHCP & ready
-# wireless: SSID/security
-# system: password
 topic = "easy-setup"
 path = "/etc/fika_manager/easy_setup.sh"
 
 [[subscribe]]
-# firewall for MAC-address/IP-address or advance traffic
 topic = "captive-portal"
 path = "/etc/fika_manager/captive-portal.sh"
 
@@ -20,21 +16,21 @@ path = "/etc/fika_manager/remote_manage.sh"
 
 [[publish]]
 topic = "provision"
-start_at = {secs = 1, nanos = 0 } # seconds
+start_at = {secs = 1, nanos = 0 }
 path = "/etc/fika_manager/provision.sh"
 
 [[publish]]
 topic = "heartbeat"
-period = {secs = 600, nanos = 0 } # seconds
+period = {secs = 600, nanos = 0 }
 path = "/etc/fika_manager/heartbeat.sh"
 
 [[publish]]
 topic = "runtime-statistics"
-start_at = {secs = 10, nanos = 0 } # seconds
-period = {secs = 600, nanos = 0 } # seconds
+start_at = {secs = 10, nanos = 0 }
+period = {secs = 600, nanos = 0 }
 path = "/etc/fika_manager/runtime_statistics.sh"
 
 [[publish]]
 topic = "maker"
-start_at = {secs = 10, nanos = 0 } # seconds
+start_at = {secs = 10, nanos = 0 }
 path = "/etc/fika_manager/maker.sh"
