@@ -1,6 +1,7 @@
 [core]
 database = "redis://127.0.0.1:6379"
 version = "0.1.0"
+thirdparty = "longdong2"
 
 [[subscribe]]
 topic = "easy-setup"

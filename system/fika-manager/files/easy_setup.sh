@@ -18,6 +18,8 @@
 #       - https://openwrt.org/docs/guide-user/network/wan/wan_interface_protocols
 #       - https://openwrt.org/docs/guide-user/base-system/basic-networking
 
+. /etc/fika_manager/common.sh
+
 msg=""
 code=404
 cmd="unknown"
@@ -31,7 +33,7 @@ account_cb() {
     if [ "X$act" = "Xmodify" ]; then
         if [ $# -eq 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ modify"
-            msg="TODO"
+            msg=$(account_modify)
             code=200
         else
             logger -s -t fika-manager -p error "[$0] $@ modify"
@@ -51,7 +53,7 @@ wan_cb() {
     if [ "X$act" = "Xpppoe" ]; then
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wan pppoe"
-            msg="TODO"
+            msg=$(wan_pppoe $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ wan pppoe"
             msg="invalid username or password"
@@ -59,11 +61,11 @@ wan_cb() {
         fi
     elif [ "X$act" = "Xdhcp" ]; then
         logger -s -t fika-manager -p debug "[$0] $@ wan dhcp"
-        msg="TODO"
+        msg=$(wan_dhcp $@)
     elif [ "X$act" = "Xwwan" ]; then
         if [ $# -ge 3 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wan wwan"
-            msg="TODO"
+            msg=$(wan_wwan $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ wan wwan"
             msg="invalid MAC address"
@@ -81,7 +83,7 @@ wlan_cb() {
     if [ "X$act" = "Xprivate" ]; then
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wlan private"
-            msg="TODO"
+            msg=$(wlan_private $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ wlan private"
             msg="invalid SSID or PSK"
@@ -90,7 +92,7 @@ wlan_cb() {
     elif [ "X$act" = "Xguest" ]; then
         if [ $# -ge 1 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wlan guest"
-            msg="TODO"
+            msg=$(wlan_guest $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ wlan guest"
             msg="invalid SSID"

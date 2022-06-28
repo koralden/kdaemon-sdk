@@ -1,0 +1,3 @@
+#!/bin/sh
+
+. thirdparty/*.sh

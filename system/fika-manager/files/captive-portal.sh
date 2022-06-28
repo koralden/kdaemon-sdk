@@ -10,6 +10,8 @@
 #       - delete {mac-addr}
 #       - update {mac-addr} {start-time} {end-time} {bandwidth}
 
+. /etc/fika_manager/common.sh
+
 msg=""
 code=404
 cmd="unknown"
@@ -49,7 +51,7 @@ firewall_cb() {
     if [ "X$act" = "Xadd" ]; then
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ firewall add"
-            msg="TODO"
+            msg=$(firewall_add $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ firewall add"
             msg="invalid MAC or IP address"
@@ -58,7 +60,7 @@ firewall_cb() {
     elif [ "X$act" = "Xdelete" ]; then
         if [ $# -eq 1 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ delete"
-            msg="TODO"
+            msg=$(firewall_delete $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ delete"
             msg="invalid MAC address"
@@ -67,7 +69,7 @@ firewall_cb() {
     elif [ "X$act" = "Xupdate" ]; then
         if [ $# -ge 3 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ update"
-            msg="TODO"
+            msg=$(firewall_update $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ update"
             msg="invalid MAC address"

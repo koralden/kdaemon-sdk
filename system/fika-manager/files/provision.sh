@@ -1,6 +1,6 @@
 #!/bin/sh
 
-[ -z docdir ] && docdir="/etc/fika"
+[ -z "$docdir" ] && docdir="/etc/fika_manager"
 sdk="\"unknown\""
 wallet="unknown"
 
