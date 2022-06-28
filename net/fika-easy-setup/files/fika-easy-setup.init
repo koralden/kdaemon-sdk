@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# start redis
+#
+
+start() {
+	. /lib/functions/network.sh
+	network_get_ipaddrs myLanIp lan
+	printf "Starting fika-easy-setup: "
+	umask 077
+	start-stop-daemon -S -q -c root:root -b \
+		-x /usr/bin/fika-easy-setup -- -a $myLanIp
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+stop() {
+	printf "Stopping fika-easy-setup: "
+	killall -KILL fika-easy-setup
+	[ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+restart() {
+	stop
+	start
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		restart
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+esac
+
+exit $?

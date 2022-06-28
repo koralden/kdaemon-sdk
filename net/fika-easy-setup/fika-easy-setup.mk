@@ -22,4 +22,14 @@ define FIKA_EASY_SETUP_BUILD_CMDS
 			--locked
 endef
 
+FIKA_EASY_SETUP_MY_DIR=package/longdong/net/fika-easy-setup/files
+define FIKA_EASY_SETUP_INSTALL_MISC
+	$(INSTALL) -m 0755 -D $(FIKA_EASY_SETUP_MY_DIR)/fika-easy-setup.init \
+		$(TARGET_DIR)/etc/init.d/S85fika-easy-setup
+	$(INSTALL) -m 0755 -D $(FIKA_EASY_SETUP_MY_DIR)/fika-easy-setup.hotplug \
+		$(TARGET_DIR)/etc/hotplug.d/iface/96-fika-easy-setup
+endef
+
+FIKA_EASY_SETUP_POST_INSTALL_TARGET_HOOKS += FIKA_EASY_SETUP_INSTALL_MISC
+
 $(eval $(cargo-package))

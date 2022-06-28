@@ -21,17 +21,17 @@ define FIKA_MANAGER_BUILD_CMDS
 			--locked
 endef
 
-MY_SRC_DIR=package/longdong/system/fika-manager/files
-MY_SRC_SCRIPT=easy_setup.sh  heartbeat.sh common.sh captive-portal.sh \
+FIKA_MANAGER_MY_DIR=package/longdong/system/fika-manager/files
+FIKA_MANAGER_MY_SCRIPT=easy_setup.sh  heartbeat.sh common.sh captive-portal.sh \
 	     maker.sh provision.sh remote_manage.sh runtime_statistics.sh \
 	     thirdparty/firewall.sh thirdparty/network.sh thirdparty/system.sh
 define FIKA_MANAGER_INSTALL_MISC
-	$(INSTALL) -m 0755 -D $(MY_SRC_DIR)/fika-manager.init \
-		$(TARGET_DIR)/etc/init.d/fika-manager
-	$(INSTALL) -m 0644 -D $(MY_SRC_DIR)/config.toml $(TARGET_DIR)/etc/fika_manager/config.toml
+	$(INSTALL) -m 0755 -D $(FIKA_MANAGER_MY_DIR)/fika-manager.init \
+		$(TARGET_DIR)/etc/init.d/S84fika-manager
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/config.toml $(TARGET_DIR)/etc/fika_manager/config.toml
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_manager/thirdparty
-	for i in $(MY_SRC_SCRIPT); do \
-		$(INSTALL) -m 0755 -D $(MY_SRC_DIR)/$${i} $(TARGET_DIR)/etc/fika_manager/$${i}; \
+	for i in $(FIKA_MANAGER_MY_SCRIPT); do \
+		$(INSTALL) -m 0755 -D $(FIKA_MANAGER_MY_DIR)/$${i} $(TARGET_DIR)/etc/fika_manager/$${i}; \
 	done
 endef
 
