@@ -12,6 +12,7 @@ if BR2_PACKAGE_LONGDONG
 	#	source package/x11r7/mcookie/Config.in
 	#endmenu
         source package/longdong/libs/aws-iot-device-sdk-embedded-C/Config.in
+        source package/longdong/libs/fika-redis/Config.in
         source package/longdong/net/fika-iot-gateway/Config.in
         source package/longdong/net/fika-easy-setup/Config.in
         source package/longdong/net/fika-opennds/Config.in
