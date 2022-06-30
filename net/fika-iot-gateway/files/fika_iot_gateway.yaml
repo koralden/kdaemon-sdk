@@ -2,12 +2,7 @@ redis :
   server  : 127.0.0.1
   port    : 6379
   subscribe :
-    - topic : hw/manufacture
-    - topic : fw
-    - topic : fw/statistics
-    - topic : activation
-    - topic : guest/control
-    - topic : challenge/report
+    - topic : test
 
 aws   :
   endpoint  : "a2dl0okey4lms3-ats.iot.ap-northeast-1.amazonaws.com"
@@ -16,3 +11,8 @@ aws   :
   key       : "/etc/fika_iot_gateway/MVP_000001-private.pem.key"
   ca        : "/etc/fika_iot_gateway/AmazonRootCA1.pem"
   thing     : "MVP_000001"
+  subscribe :
+    - topic : remote-manage
+    - topic : honest-challenge
+    - topic : captive-portal
+    - topic : pairing

@@ -1,5 +1,5 @@
 use clap::Parser;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -190,7 +190,8 @@ fn next_topics(expirations: Arc<Mutex<ExpirationT>>) -> Option<(Instant, String)
     let expirations = &mut *expirations;
     let now = Instant::now();
     while let Some((&(when, id), (topic, _))) = expirations.iter().next() {
-        if when > now {
+        /* TODO equal case to cover the same start time */
+        if when >= now {
             return Some((when, topic.to_string()));
         } else {
             if let Some((topic, Some(period))) = expirations.remove(&(when, id)) {
@@ -230,22 +231,15 @@ async fn publish_message(
 async fn capture_process_stream(
     process_stream: Result<impl Stream<Item = ProcessItem> + Send + std::marker::Unpin>,
 ) -> Result<String> {
-    let mut payload = String::new();
+    let mut output = String::new();
+    let mut error = String::new();
 
     if let Ok(mut cmd_stream) = process_stream {
-        let mut output = String::new();
-        let mut error = String::new();
         while let Some(pi) = cmd_stream.next().await {
             match pi {
                 ProcessItem::Exit(e) => {
-                    /* TODO, how to know kill or error exit? */
                     debug!("Exit {e}");
-
-                    if error.len() == 0 {
-                        payload.push_str(&format!(r#"{{"code":200, "output":{}}}"#, output));
-                    } else {
-                        payload.push_str(&format!(r#"{{"code":501, "error":{}}}"#, error));
-                    }
+                    /* TODO, how to know kill or error exit? */
                 }
                 ProcessItem::Error(e) => {
                     debug!("Error {e}");
@@ -259,10 +253,14 @@ async fn capture_process_stream(
         }
     } else {
         //error!("{:#?} not found", process);
-        payload.push_str(r#"{"code":404, "error":"Not Found"}"#);
+        error.push_str(r#"Not Found}"#);
     }
 
-    Ok(payload)
+    if error.len() == 0 {
+        Ok(output)
+    } else {
+        Err(anyhow!(error))
+    }
 }
 
 fn spawn_task_run_path_publish(
@@ -341,14 +339,6 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                     _ => None,
                 };
 
-                /* run immediately */
-                _ = spawn_task_run_path_publish(
-                    chan_tx.clone(),
-                    topic.to_string(),
-                    path.to_path_buf(),
-                    timeout,
-                );
-
                 if let Some(period) = *period {
                     let when = now + period;
                     debug!(
@@ -358,27 +348,16 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                     );
                     expirations.insert((when, id), (topic.to_string(), Some(period)));
                     id = id + 1;
+                } else {
+                    /* run immediately */
+                    _ = spawn_task_run_path_publish(
+                        chan_tx.clone(),
+                        topic.to_string(),
+                        path.to_path_buf(),
+                        timeout);
                 }
             }
         }
-        /*if *is_loop {
-            if let Some(period) = *period {
-                let when = now + period;
-                info!(
-                    "entries insert {:?} {:?}",
-                    (when, id),
-                    (topic, period)
-                );
-                expirations.insert((when, id), (topic.to_string(), period));
-                id = id + 1;
-            }
-        } else {
-            _ = spawn_task_run_path_publish(
-                chan_tx.clone(),
-                topic.to_string(),
-                path.to_path_buf(),
-                10);
-        }*/
     }
 
     let expirations_cloned = Arc::new(Mutex::new(expirations)).clone();

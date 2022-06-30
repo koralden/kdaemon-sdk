@@ -157,7 +157,8 @@ static void updateDeltaHandler( MQTTPublishInfo_t * pPublishInfo,
  * @param[in] pPublishInfo Deserialized publish info pointer for the incoming
  * packet.
  */
-static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo );
+static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo,
+        const char *shadow, uint8_t shadow_len);
 
 /**
  * @brief Process payload from `/delete/rejected` topic.
@@ -279,6 +280,10 @@ static void updateDeltaHandler( MQTTPublishInfo_t * pPublishInfo,
         return;
     }
 
+    redis_publish_shadow_message("delta",
+            shadow, shadow_len,
+            pPublishInfo->pPayload, pPublishInfo->payloadLength);
+
     /* Then we start to get the version value by JSON keyword "version". */
     result = JSON_Search( ( char * ) pPublishInfo->pPayload,
             pPublishInfo->payloadLength,
@@ -314,74 +319,20 @@ static void updateDeltaHandler( MQTTPublishInfo_t * pPublishInfo,
                     shadow_len, shadow, 
                     outValueLength, outValue ) );*/
 
-        redis_publish_shadow_message(shadow, shadow_len,
+        redis_publish_shadow_message("state",
+                shadow, shadow_len,
                 outValue, outValueLength);
     }
     else
     {
         LogError( ( "No state in json document!!" ) );
     }
-
-#if 0
-    LogInfo( ( "version:%d, currentVersion:%d \r\n", version, currentVersion ) );
-
-    /* When the version is much newer than the on we retained, that means the powerOn
-     * state is valid for us. */
-    if( version > currentVersion )
-    {
-        /* Set to received version as the current version. */
-        currentVersion = version;
-
-        /* Get powerOn state from json documents. */
-        result = JSON_Search( ( char * ) pPublishInfo->pPayload,
-                              pPublishInfo->payloadLength,
-                              "state.powerOn",
-                              sizeof( "state.powerOn" ) - 1,
-                              &outValue,
-                              ( size_t * ) &outValueLength );
-    }
-    else
-    {
-        /* In this demo, we discard the incoming message
-         * if the version number is not newer than the latest
-         * that we've received before. Your application may use a
-         * different approach.
-         */
-        LogWarn( ( "The received version is smaller than current one!!" ) );
-    }
-
-    if( result == JSONSuccess )
-    {
-        /* Convert the powerOn state value to an unsigned integer value. */
-        newState = ( uint32_t ) strtoul( outValue, NULL, 10 );
-
-        LogInfo( ( "The new power on state newState:%d, currentPowerOnState:%d \r\n",
-                   newState, currentPowerOnState ) );
-
-        if( newState != currentPowerOnState )
-        {
-            /* The received powerOn state is different from the one we retained before, so we switch them
-             * and set the flag. */
-            currentPowerOnState = newState;
-
-            /* State change will be handled in main(), where we will publish a "reported"
-             * state to the device shadow. We do not do it here because we are inside of
-             * a callback from the MQTT library, so that we don't re-enter
-             * the MQTT library. */
-            stateChanged = true;
-        }
-    }
-    else
-    {
-        LogError( ( "No powerOn in json document!!" ) );
-        eventCallbackError = true;
-    }
-#endif
 }
 
 /*-----------------------------------------------------------*/
 
-static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo )
+static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo,
+        const char *shadow, uint8_t shadow_len)
 {
     char * outValue = NULL;
     uint32_t outValueLength = 0U;
@@ -438,6 +389,10 @@ static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo )
 
     if( result == JSONSuccess )
     {
+        redis_publish_shadow_message("accepted",
+                shadow, shadow_len,
+                pPublishInfo->pPayload, pPublishInfo->payloadLength);
+
         LogInfo( ( "clientToken: %.*s", outValueLength,
                    outValue ) );
 
@@ -520,7 +475,8 @@ static void eventCallback( MQTTContext_t * pMqttContext,
             else if( messageType == ShadowMessageTypeUpdateAccepted )
             {
                 /* Handler function to process payload. */
-                updateAcceptedHandler( pDeserializedInfo->pPublishInfo );
+                updateAcceptedHandler( pDeserializedInfo->pPublishInfo,
+                        pShadowName, shadowNameLength );
             }
             else if( messageType == ShadowMessageTypeUpdateDocuments )
             {
@@ -604,16 +560,19 @@ static int iot_init(void *vcfg)
 
 typedef struct {
     uv_idle_t p_idle;
+#ifdef CONFIG_SELF_TEST
     uv_timer_t p_timer;
+#endif
 
+    int status;
     void *extra;
     uint64_t timer_cnt;
     int fail_cnt;
-    int status;
     int init_cnt;
     int delay_time;
 } fika_idle_t;
 
+#ifdef CONFIG_SELF_TEST
 #define IOT_TIMER_LOOP_MS       600002
 static void iot_timer_loop(uv_timer_t *timer)
 {
@@ -649,6 +608,7 @@ static void iot_timer_loop(uv_timer_t *timer)
 
     return;
 }
+#endif
 
 static void process_task(uv_idle_t *h)
 {
@@ -666,8 +626,9 @@ static void process_task(uv_idle_t *h)
             idle->init_cnt = 0;
             idle->delay_time = 500;
 
-
+#ifdef CONFIG_SELF_TEST
             uv_timer_start(&idle->p_timer, iot_timer_loop, 2000, IOT_TIMER_LOOP_MS);
+#endif
         }
     }
     else {
@@ -679,7 +640,9 @@ static void process_task(uv_idle_t *h)
             idle->status = -1;
             idle->fail_cnt = 0;
 
+#ifdef CONFIG_SELF_TEST
             uv_timer_stop(&idle->p_timer);
+#endif
             iot_init(idle->extra);
 
             idle->init_cnt++;
@@ -691,6 +654,7 @@ static void process_task(uv_idle_t *h)
             }
         }
     }
+
     uv_sleep(idle->delay_time);
 
     return;
@@ -707,7 +671,9 @@ aws_handle_t *aws_init(void *event_loop, void *vcfg)
     ret = iot_init(vcfg);
 
     uv_idle_init(uv_loop, &idler.p_idle);
+#ifdef CONFIG_SELF_TEST
     uv_timer_init(uv_loop, &idler.p_timer);
+#endif
     idler.init_cnt = 1;
     idler.delay_time = 100;
     idler.status = 1;

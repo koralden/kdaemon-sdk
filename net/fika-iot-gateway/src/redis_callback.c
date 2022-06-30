@@ -11,7 +11,17 @@
 #include "aws_callback.h"
 
 static redis_handle_t priv_redis_hdr;
-redisAsyncContext *gateway;
+static redisAsyncContext *gateway;
+static uv_async_t async_gateway;
+
+static void async_gateway_update(uv_async_t *handle)
+{
+    printf("[debug][%s] TODO if need history/confirm via redis\n",
+            __func__);
+    /*redisAsyncCommand(gateway, NULL, NULL, "LPUSH %s %s",
+            "test", "test");*/
+    return;
+}
 
 static void connectCallback(const redisAsyncContext *c, int status) {
     if (status != REDIS_OK) {
@@ -49,8 +59,9 @@ static void shadow_subCallback(redisAsyncContext *c, void *r, void *privdata)
             ret = aws_shadow_subscribe_dynamic(reply->element[2]->str);
         //}
         if (ret >= 0) {
-            redisAsyncCommand(gateway, NULL, NULL, "LPUSH %s %s",
-                    reply->element[1]->str, reply->element[2]->str);
+            /*redisAsyncCommand(gateway, NULL, NULL, "LPUSH %s %s",
+                    reply->element[1]->str, reply->element[2]->str);*/
+            uv_async_send(&async_gateway);
         }
     } else {
     }
@@ -92,8 +103,9 @@ static void update_shadow_callback(redisAsyncContext *c, void *r, void *privdata
             ret = aws_shadow_publish_dynamic(topic, value);
         //}
         if (ret >= 0) {
-            redisAsyncCommand(gateway, NULL, NULL, "LPUSH %s %s",
-                    reply->element[2]->str, reply->element[3]->str);
+            /*redisAsyncCommand(gateway, NULL, NULL, "LPUSH %s %s",
+                    reply->element[2]->str, reply->element[3]->str);*/
+            uv_async_send(&async_gateway);
         }
     } else {
     }
@@ -116,9 +128,7 @@ static void publish_callback(redisAsyncContext *c, void *r, void *privdata) {
         printf("[publish][error]: %s\n", c->errstr ? c->errstr : "unknown error");
         return;
     }
-    else {
-        printf("[publish][error]: %s\n", "ok todo");
-    }
+    /* XXX more information/debug if want to trace */
     return;
 }
 
@@ -200,6 +210,7 @@ redis_handle_t *redis_init(void *event_loop, char *server_ip, int port)
     redisAsyncSetConnectCallback(gateway, connectCallback);
     redisAsyncSetDisconnectCallback(gateway, disconnectCallback);
     //redisAsyncSetTimeout(gateway, (struct timeval){ .tv_sec = 2, .tv_usec = 0});
+    uv_async_init(uv_loop, &async_gateway, async_gateway_update);
 
     /* TODO */
     redisAsyncCommand(c, mqtt_subCallback, &priv_redis_hdr,
@@ -207,8 +218,13 @@ redis_handle_t *redis_init(void *event_loop, char *server_ip, int port)
     redisAsyncCommand(c, shadow_subCallback, &priv_redis_hdr,
             "SUBSCRIBE nms.shadow.subscribe");
 
-    redisAsyncCommand(c, update_mqtt_callback, NULL, "PSUBSCRIBE nms.mqtt.update.*");
-    redisAsyncCommand(c, update_shadow_callback, NULL, "PSUBSCRIBE nms.shadow.update.*");
+    redisAsyncCommand(c, update_mqtt_callback, NULL,
+            "PSUBSCRIBE nms.mqtt.update.*");
+    redisAsyncCommand(c, update_shadow_callback, NULL,
+            "PSUBSCRIBE nms.shadow.update.*");
+
+    redisAsyncCommand(gateway, NULL, NULL, "PUBLISH service.cmp ready");
+    redisAsyncCommand(gateway, NULL, NULL, "SET service.cmp ready");
 
     return &priv_redis_hdr;
 }
@@ -233,7 +249,8 @@ int redis_publish(void *hdp, void *extra)
     return -1;
 }
 
-int redis_publish_shadow_message(const char *shadow, uint8_t shadow_len,
+int redis_publish_shadow_message(const char *type,
+        const char *shadow, uint8_t shadow_len,
         const char *value, uint32_t value_len)
 {
     /*printf("[redis][debug] PUBLISH %.*s '%.*s'\n",
@@ -242,7 +259,8 @@ int redis_publish_shadow_message(const char *shadow, uint8_t shadow_len,
 
     char shadow_str[256];
     memset(shadow_str, 0x0, sizeof(shadow_str));
-    snprintf(shadow_str, sizeof(shadow_str) - 1, "%.*s", shadow_len, shadow);
+    snprintf(shadow_str, sizeof(shadow_str) - 1, "nms.shadow.%s.%.*s",
+            type, shadow_len, shadow);
 
     /*  pass binary safe strings in a command, the %b specifier can be used.
      *  Together with a pointer to the string, it requires a size_t length
@@ -253,3 +271,4 @@ int redis_publish_shadow_message(const char *shadow, uint8_t shadow_len,
             shadow_str, value, value_len);
     return 0;
 }
+

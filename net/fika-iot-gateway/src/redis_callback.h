@@ -15,7 +15,8 @@ redis_handle_t *redis_init(void *event_loop, char *server_ip, int port);
 int redis_subscribe_register(redis_handle_t *hdp, int (*cb)(void *, void*),
         void *cb_hdp, void *cb_extra);
 int redis_publish(void *hdp, void *extra);
-int redis_publish_shadow_message(const char *shadow, uint8_t shadow_len,
+int redis_publish_shadow_message(const char *type,
+        const char *shadow, uint8_t shadow_len,
         const char *value, uint32_t value_len);
 
 #endif // __REDIS_CALLBACK_H__

@@ -15,23 +15,27 @@ path = "/etc/fika_manager/captive-portal.sh"
 topic = "cmp/remote-manage"
 path = "/etc/fika_manager/remote_manage.sh"
 
+[[subscribe]]
+topic = "cmp/pairing"
+path = "/etc/fika_manager/cmp_pairing.sh"
+
 [[publish]]
-topic = "provision"
-start_at = {secs = 1, nanos = 0 }
+topic = "nms.shadow.update.provision"
+start_at = {secs = 3, nanos = 0 }
 path = "/etc/fika_manager/provision.sh"
 
 [[publish]]
-topic = "heartbeat"
+topic = "nms.shadow.update.heartbeat"
 period = {secs = 600, nanos = 0 }
 path = "/etc/fika_manager/heartbeat.sh"
 
 [[publish]]
-topic = "runtime-statistics"
-start_at = {secs = 10, nanos = 0 }
+topic = "nms.shadow.update.runtime-statistics"
+start_at = {secs = 30, nanos = 0 }
 period = {secs = 600, nanos = 0 }
 path = "/etc/fika_manager/runtime_statistics.sh"
 
 [[publish]]
-topic = "maker"
+topic = "nms.shadow.update.maker"
 start_at = {secs = 10, nanos = 0 }
 path = "/etc/fika_manager/maker.sh"
