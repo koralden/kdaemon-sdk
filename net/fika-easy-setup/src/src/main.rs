@@ -548,40 +548,78 @@ struct PairingCfg {
     otp: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct IotPairingCfg {
+    #[serde(rename = "wallet-address")]
+    wallet: String,
+    #[serde(rename = "confirm-otp")]
+    otp: u16,
+}
+
 // Valid user session required. If there is none, redirect to the auth page
 async fn create_pairing(
     user: Option<SimpleUser>,
     Json(input): Json<PairingCfg>,
     Extension(cache): Extension<redis::Client>,
+    Extension(opt): Extension<Opt>,
 ) -> impl IntoResponse {
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
     } else {
         dbg!(&input);
         let mut conn = cache.get_async_connection().await.unwrap();
-        let msg = serde_json::to_string(&input).unwrap();
-        conn.publish::<&str, &str, usize>("kcom:pairing", &msg)
-            .await
-            .unwrap();
 
-        let mut sub_conn = conn.into_pubsub();
-        sub_conn.subscribe("nms:pairing").await.unwrap();
-        let mut sub_stream = sub_conn.on_message();
-
-        /*TODO, ui/ux display progress for this long-term job */
-        let resp = tokio::select! {
-            Some(res) = sub_stream.next() => {
-                match res.get_payload::<String>() {
-                    Ok(_) => "rocket".to_string(),
-                    _ => "pick".to_string(),
+        /* input.otp need check or frondend check? */
+        if let Ok(otp) = input.otp.parse::<u16>() {
+            /* check if have got otp from nms(<-cmp) */
+            if let Ok(saved_otp) = conn.get::<&str, u16>("nms.pairing.otp").await {
+                if saved_otp == otp {
+                    return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
+                        .await
+                        .into_response();
                 }
-            },
-            _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
-        };
+            }
 
-        get_result_emoji("Pairing Success", &resp)
-            .await
-            .into_response()
+            let iot = IotPairingCfg {
+                wallet: opt.wallet_addr,
+                otp,
+            };
+
+            let msg = serde_json::to_string(&iot).unwrap();
+            conn.publish::<&str, &str, usize>("nms.shadow.update.pairing", &msg)
+                .await
+                .unwrap();
+
+            let mut sub_conn = conn.into_pubsub();
+            sub_conn.subscribe("nms.pairing.status").await.unwrap();
+            let mut sub_stream = sub_conn.on_message();
+
+            /*TODO, ui/ux display progress for this long-term job */
+            let resp = tokio::select! {
+                Some(res) = sub_stream.next() => {
+                    match res.get_payload::<String>() {
+                        Ok(status) => {
+                            if status.eq("success") {
+                                "rocket".to_string()
+                            }
+                            else {
+                                "thumbs down".to_string()
+                            }
+                        },
+                        _ => "pick".to_string(),
+                    }
+                },
+                _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+            };
+
+            get_result_emoji(&format!("Pairing {}", resp), &resp)
+                .await
+                .into_response()
+        } else {
+            get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
+                .await
+                .into_response()
+        }
     }
 }
 

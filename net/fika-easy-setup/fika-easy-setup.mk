@@ -28,6 +28,9 @@ define FIKA_EASY_SETUP_INSTALL_MISC
 		$(TARGET_DIR)/etc/init.d/S85fika-easy-setup
 	$(INSTALL) -m 0755 -D $(FIKA_EASY_SETUP_MY_DIR)/fika-easy-setup.hotplug \
 		$(TARGET_DIR)/etc/hotplug.d/iface/96-fika-easy-setup
+	$(INSTALL) -d $(TARGET_DIR)/etc/fika_easy_setup
+	cp -a $(@D)/certs $(TARGET_DIR)/etc/fika_easy_setup
+	cp -a $(@D)/templates $(TARGET_DIR)/etc/fika_easy_setup
 endef
 
 FIKA_EASY_SETUP_POST_INSTALL_TARGET_HOOKS += FIKA_EASY_SETUP_INSTALL_MISC

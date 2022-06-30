@@ -9,7 +9,12 @@ start() {
 	printf "Starting fika-easy-setup: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \
-		-x /usr/bin/fika-easy-setup -- -a $myLanIp
+		-x /usr/bin/fika-easy-setup -- \
+                -a $myLanIp -w TODO-BINANCE-WALLET \
+                --certificate /etc/fika_easy_setup/certs/cert.pem \
+                --private-key /etc/fika_easy_setup/certs/key.pem \
+                --static-dir /etc/fika_easy_setup/templates
+
 	[ $? = 0 ] && echo "OK" || echo "FAIL"
 }
 stop() {
