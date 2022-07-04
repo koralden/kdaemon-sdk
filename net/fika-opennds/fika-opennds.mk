@@ -29,10 +29,13 @@ define FIKA_OPENNDS_BUILD_CMDS
 	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) all
 endef
 
+FIKA_OPENNDS_MY_DIR=package/longdong/net/fika-opennds/files/buildroot
 define FIKA_OPENNDS_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/opennds $(TARGET_DIR)/usr/bin/opennds
-	$(INSTALL) -d -m 0755 $(TARGET_DIR)/etc/opennds/
-	echo "TODO"
+	$(INSTALL) -D -m 0755 $(@D)/ndsctl $(TARGET_DIR)/usr/bin/ndsctl
+	$(INSTALL) -d -m 0755 $(TARGET_DIR)/etc/fika_opennds/
+	tar cvf - -C $(FIKA_OPENNDS_MY_DIR)/ etc usr \
+		| tar xvf - -C $(TARGET_DIR)/
 endef
 
 $(eval $(generic-package))
