@@ -1,0 +1,9 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+/etc/init.d/fika-opennds enabled && [ "$ACTION" = "ifup" ] && {
+    if [ ${INTERFACE} = 'guest' ]; then
+        /etc/init.d/fika-opennds restart
+    fi
+}

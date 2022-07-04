@@ -1,7 +1,11 @@
-#!/bin/sh
+#!/bin/sh /etc/rc.common
 #
 # start redis
 #
+
+#USE_PROCD=1
+START=97
+STOP=10
 
 start() {
 	. /lib/functions/network.sh
@@ -26,20 +30,3 @@ restart() {
 	stop
 	start
 }
-
-case "$1" in
-	start)
-		start
-		;;
-	stop)
-		stop
-		;;
-	restart|reload)
-		restart
-		;;
-	*)
-		echo "Usage: $0 {start|stop|restart}"
-		exit 1
-esac
-
-exit $?

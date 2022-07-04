@@ -36,7 +36,7 @@ FIKA_IOT_GATEWAY_MY_DIR=package/longdong/net/fika-iot-gateway/files
 FIKA_IOT_GATEWAY_MY_FILES=fika_iot_gateway.yaml MVP_000001-certificate.pem.crt MVP_000001-private.pem.key AmazonRootCA1.pem AmazonRootCA3.pem
 define FIKA_IOT_GATEWAY_INSTALL_MISC
 	$(INSTALL) -m 0755 -D $(FIKA_IOT_GATEWAY_MY_DIR)/fika_iot_gateway.init \
-		$(TARGET_DIR)/etc/init.d/S80fika-iot-gateway
+		$(TARGET_DIR)/etc/init.d/fika-iot-gateway
 	$(INSTALL) -m 0755 -D $(FIKA_IOT_GATEWAY_MY_DIR)/fika-iot-gateway.hotplug \
 		$(TARGET_DIR)/etc/hotplug.d/iface/90-fika-iot-gateway
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_iot_gateway
