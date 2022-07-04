@@ -8,7 +8,7 @@ start() {
 	umask 077
         [ -d /var/lib/redis ] || mkdir -p /var/lib/redis
 	start-stop-daemon -S -q -c root:root -b \
-		--exec /usr/bin/redis-server -- /etc/fika-redis.conf
+		-x /usr/bin/redis-server -- /etc/fika-redis.conf
 	[ $? = 0 ] && echo "OK" || echo "FAIL"
 }
 stop() {
