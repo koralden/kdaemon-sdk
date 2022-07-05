@@ -37,7 +37,7 @@ struct Opt {
 struct Config {
     core: ConfigCore,
     subscribe: Option<Vec<ConfigSubscribe>>,
-    publish: Option<Vec<ConfigPublish>>,
+    task: Option<Vec<ConfigTask>>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -56,11 +56,13 @@ struct ConfigSubscribe {
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
 #[allow(dead_code)]
-struct ConfigPublish {
+struct ConfigTask {
     topic: String,
     path: PathBuf,
     start_at: Option<Duration>,
     period: Option<Duration>,
+    db_publish: Option<bool>,
+    db_set: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -202,6 +204,7 @@ fn next_topics(expirations: Arc<Mutex<ExpirationT>>) -> Option<(Instant, String)
     }
     None
 }
+
 #[instrument(skip(chan_tx))]
 async fn publish_message(
     chan_tx: mpsc::Sender<Command>,
@@ -212,6 +215,31 @@ async fn publish_message(
 
     chan_tx
         .send(Command::Publish {
+            key: topic.clone(),
+            val: payload,
+            resp: resp_tx,
+        })
+        .await?;
+
+    let res = resp_rx.await;
+    debug!(
+        "[publish_task][publish][{}] transmit response {:?}",
+        topic, res
+    );
+
+    Ok(())
+}
+
+#[instrument(skip(chan_tx))]
+async fn set_message(
+    chan_tx: mpsc::Sender<Command>,
+    topic: String,
+    payload: String,
+) -> Result<()> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+
+    chan_tx
+        .send(Command::Set {
             key: topic.clone(),
             val: payload,
             resp: resp_tx,
@@ -268,6 +296,8 @@ fn spawn_task_run_path_publish(
     topic: String,
     path: PathBuf,
     timeout: Option<Duration>,
+    db_publish: Option<bool>,
+    db_set: Option<bool>,
 ) -> Result<()> {
     let mut process = Process::new(&path);
     if let Ok(process_stream) = process.spawn_and_stream() {
@@ -277,13 +307,14 @@ fn spawn_task_run_path_publish(
                 None => Duration::from_secs(86400), /* XXX 24h */
             };
             tokio::select! {
-                Ok(payload) = capture_process_stream(
-                    //chan_tx.clone(),
-                    //topic.to_string(),
-                    Ok(process_stream)) => {
+                Ok(payload) = capture_process_stream(Ok(process_stream)) => {
                     //debug!("task-{} completed", topic);
-
-                    publish_message(chan_tx, topic, payload).await?;
+                    if db_publish.is_some() {
+                        publish_message(chan_tx.clone(), topic.clone(), payload.clone()).await?;
+                    }
+                    if db_set.is_some() {
+                        set_message(chan_tx, topic, payload).await?;
+                    }
                 }
                 _ = time::sleep(timeout) => {
                     error!("{} task timeout({:?}) exit", topic, timeout);
@@ -306,12 +337,12 @@ fn spawn_task_run_path_publish(
     skip(chan_tx, shared),
 )]
 async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) -> Result<()> {
-    let mut entries: HashMap<String, (PathBuf, Option<Duration>, Option<Duration>)> =
+    let mut entries: HashMap<String, (PathBuf, Option<Duration>, Option<Duration>, Option<bool>, Option<bool>)> =
         HashMap::new();
     if let Ok(state) = shared.lock() {
-        if let Some(ps) = &state.cfg.publish {
+        if let Some(ps) = &state.cfg.task {
             for p in ps {
-                entries.insert(p.topic.clone(), (p.path.clone(), p.start_at, p.period));
+                entries.insert(p.topic.clone(), (p.path.clone(), p.start_at, p.period, p.db_publish, p.db_set));
             }
         }
     }
@@ -321,7 +352,7 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
     let now = Instant::now();
     let mut id = 1;
 
-    for (topic, (path, start_at, period)) in &entries {
+    for (topic, (path, start_at, period, db_publish, db_set)) in &entries {
         match *start_at {
             Some(start) => {
                 let when = now + start;
@@ -354,7 +385,8 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                         chan_tx.clone(),
                         topic.to_string(),
                         path.to_path_buf(),
-                        timeout);
+                        timeout,
+                        *db_publish, *db_set);
                 }
             }
         }
@@ -365,12 +397,13 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
         while let Some((when, topic)) = next_topics(expirations_cloned.clone()) {
             tokio::select! {
                 _ = time::sleep_until(when) => {
-                    if let Some((path, _, period)) =entries.get(&topic) {
+                    if let Some((path, _, period, db_publish, db_set)) =entries.get(&topic) {
                         _ = spawn_task_run_path_publish(
                             chan_tx.clone(),
                             topic.to_string(),
                             path.to_path_buf(),
-                            *period);
+                            *period,
+                            *db_publish, *db_set);
                     }
                 }
             }
@@ -495,7 +528,7 @@ async fn main() -> Result<(), MyError> {
 
 #[tokio::test]
 async fn test_toml_duration() {
-    let cp = ConfigPublish {
+    let cp = ConfigTask {
         topic: String::from("test"),
         path: PathBuf::from("/tmp/test.sh"),
         start_at: Some(Duration::from_secs(1)),

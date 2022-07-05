@@ -91,6 +91,7 @@ static API_PATH_PAIRING: &str = "/pairing";
 static API_PATH_HONEST_CHALLENGE: &str = "/honest/challenge";
 static API_PATH_SHOW_EMOJI: &str = "/show/emoji";
 static API_PATH_LOGOUT: &str = "/logout";
+static API_PATH_SYSTEM_CHECKING: &str = "/system/checking";
 
 #[tokio::main]
 async fn main() {
@@ -134,6 +135,7 @@ async fn main() {
             get(honest_challenge).post(update_honest_challenge),
         )
         .route(API_PATH_LOGOUT, get(logout))
+        .route(API_PATH_SYSTEM_CHECKING, get(system_checking))
         .layer(Extension(store))
         .layer(Extension(cache))
         .layer(Extension(simple_client))
@@ -434,13 +436,22 @@ async fn show_easy_setup(user: Option<SimpleUser>) -> Html<&'static str> {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+enum WanType {
+    Dhcp,
+    Pppoe,
+    Wwan,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(dead_code)]
 struct SimpleConfig {
-    wan_type: String,
-    wan_ipaddr: String,
+    user_password: Option<String>,
+    wan_type: WanType,
+    wan_username: Option<String>,
+    wan_password: Option<String>,
     wifi_ssid: String,
-    wifi_password: String,
+    wifi_password: Option<String>,
 }
 
 // Valid user session required. If there is none, redirect to the auth page
@@ -494,8 +505,8 @@ async fn get_result_emoji(result: &str, emoji: &str) -> impl IntoResponse {
         }
         None => Html(
             RESULT_TEMP
-                .replace("{{ content }}", "")
-                .replace("{{ help }}", ""),
+                .replace("{{ emoji }}", "")
+                .replace("{{ result }}", result),
         ),
     }
 }
@@ -721,4 +732,36 @@ fn simple_client(opt: &Opt) -> SimpleClient {
     let client_password = env::var("CLIENT_SECRET").unwrap_or(client_password);
 
     SimpleClient::new(client_username, client_password)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+struct SystemChecking {
+    code: u16,
+    message: String,
+}
+
+async fn system_checking(
+    user: Option<SimpleUser>,
+    Extension(cache): Extension<redis::Client>,
+) -> impl IntoResponse {
+    if user.is_none() {
+        //Redirect::temporary(API_PATH_SETUP_EASY).into_response()
+        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
+    } else {
+        let mut emoji = String::from("prohibited");
+        if let Ok(mut conn) = cache.get_async_connection().await {
+            match conn.get::<&str, String>("kdaemon.system.checking").await {
+                Ok(data) => {
+                    if let Ok(sc) = serde_json::from_str::<SystemChecking>(&data) {
+                        if sc.code == 200 {
+                            emoji = "rocket".to_string();
+                        }
+                    }
+                },
+                Err(_) => {},
+            }
+        }
+        get_result_emoji("System Check...", &emoji).await.into_response()
+    }
 }
