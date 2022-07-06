@@ -39,6 +39,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
+use tracing::{debug, error, info, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug, Clone)]
@@ -92,6 +93,7 @@ static API_PATH_HONEST_CHALLENGE: &str = "/honest/challenge";
 static API_PATH_SHOW_EMOJI: &str = "/show/emoji";
 static API_PATH_LOGOUT: &str = "/logout";
 static API_PATH_SYSTEM_CHECKING: &str = "/system/checking";
+static API_PATH_POR_WIFI: &str = "/por/wifi";
 
 #[tokio::main]
 async fn main() {
@@ -136,6 +138,7 @@ async fn main() {
         )
         .route(API_PATH_LOGOUT, get(logout))
         .route(API_PATH_SYSTEM_CHECKING, get(system_checking))
+        .route(API_PATH_POR_WIFI, get(por_wifi).post(por_wifi))
         .layer(Extension(store))
         .layer(Extension(cache))
         .layer(Extension(simple_client))
@@ -427,14 +430,7 @@ async fn do_simple_auth(
     }
 }
 
-async fn show_easy_setup(user: Option<SimpleUser>) -> Html<&'static str> {
-    if user.is_none() {
-        //Redirect::temporary(API_PATH_SETUP_EASY).into_response()
-        Html(std::include_str!("../templates/login.html"))
-    } else {
-        Html(std::include_str!("../templates/easy_setup.html"))
-    }
-}
+const EASY_SETUP_TEMP: &str = std::include_str!("../templates/easy_setup.html");
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 enum WanType {
@@ -446,12 +442,30 @@ enum WanType {
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(dead_code)]
 struct SimpleConfig {
-    user_password: Option<String>,
-    wan_type: WanType,
+    wan_type: u8,
     wan_username: Option<String>,
     wan_password: Option<String>,
     wifi_ssid: String,
     wifi_password: Option<String>,
+    password_overwrite: Option<String>,
+}
+
+async fn show_easy_setup(
+    user: Option<SimpleUser>,
+    Extension(cache): Extension<redis::Client>,
+) -> impl IntoResponse {
+    if user.is_none() {
+        Html(std::include_str!("../templates/login.html")).into_response()
+    } else {
+        let mut cfg = String::from(r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#);
+        if let Ok(mut conn) = cache.get_async_connection().await {
+            cfg = conn
+                .get::<&str, String>("kdaemon.easy.setup")
+                .await
+                .unwrap_or_else(|_| "{}".into());
+        }
+        Html(EASY_SETUP_TEMP.replace("{{ getJson }}", &cfg)).into_response()
+    }
 }
 
 // Valid user session required. If there is none, redirect to the auth page
@@ -465,29 +479,41 @@ async fn update_easy_setup(
     } else {
         dbg!(&cfg);
 
-        let mut conn = cache.get_async_connection().await.unwrap();
-        let msg = serde_json::to_string(&cfg).unwrap();
-        conn.publish::<&str, &str, usize>("kcom:easy:setup", &msg)
-            .await
-            .unwrap();
-
-        let mut sub_conn = conn.into_pubsub();
-        sub_conn.subscribe("platform:easy:setup").await.unwrap();
-        let mut sub_stream = sub_conn.on_message();
-
-        /*TODO, ui/ux display progress for this long-term job */
-        let resp = tokio::select! {
-            Some(res) = sub_stream.next() => {
-                //res.get_payload::<String>().unwrap(),
-                match res.get_payload::<String>() {
-                    Ok(_) => "hundred points".to_string(),
-                    _ => "NG".to_string(),
-                }
-            },
-            _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+        let msg = match serde_json::to_string(&cfg) {
+            Ok(c) => c,
+            Err(e) => { dbg!(&e); "{}".into() },
         };
 
-        get_result_emoji("Setup Done", &resp).await.into_response()
+        if let Ok(mut conn) = cache.get_async_connection().await {
+            conn.set::<&str, &str, String>("kdaemon.easy.setup", &msg)
+                .await
+                .unwrap();
+            conn.publish::<&str, &str, usize>("kdaemon.easy.setup", &msg)
+                .await
+                .unwrap();
+
+            let mut sub_conn = conn.into_pubsub();
+            sub_conn.subscribe("kdaemon.easy.setup").await.unwrap();
+            let mut sub_stream = sub_conn.on_message();
+
+            /*TODO, ui/ux display progress for this long-term job */
+            let resp = tokio::select! {
+                Some(res) = sub_stream.next() => {
+                    //res.get_payload::<String>().unwrap(),
+                    match res.get_payload::<String>() {
+                        Ok(_) => "hundred points".to_string(),
+                        _ => "NG".to_string(),
+                    }
+                },
+                _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+            };
+
+            get_result_emoji("Setup Done", &resp).await.into_response()
+        } else {
+            dbg!(&msg);
+            let resp = "NG".to_string();
+            get_result_emoji("Setup Fail", &resp).await.into_response()
+        }
     }
 }
 
@@ -531,15 +557,15 @@ async fn show_pairing(
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
     } else {
-        let wallet_addr = opt.wallet_addr;
+        let wallet_addr = opt.wallet_addr.clone();
 
         let code = QrCode::new(wallet_addr.into_bytes()).unwrap();
         let mut image = code
             .render()
             .min_dimensions(360, 360)
             .max_dimensions(360, 360)
-            .light_color(svg::Color("#fff"))
-            .dark_color(svg::Color("#000"))
+            .light_color(svg::Color("#696969"))
+            .dark_color(svg::Color("#fff"))
             .quiet_zone(true)
             .build()
             .into_bytes();
@@ -548,7 +574,11 @@ async fn show_pairing(
         Html(
             PAIRING_TEMP
                 .replace("{{ content }}", &String::from_utf8_lossy(&image))
-                .replace("{{ help }}", ""),
+                .replace(
+                    "{{ getJson }}",
+                    &String::from(r#"{"ownerId": "(check via APP)", "paired": false}"#),
+                )
+                .replace("{{ routerId }}", &opt.wallet_addr),
         )
         .into_response()
     }
@@ -564,7 +594,7 @@ struct IotPairingCfg {
     #[serde(rename = "wallet-address")]
     wallet: String,
     #[serde(rename = "confirm-otp")]
-    otp: u16,
+    otp: String,
 }
 
 // Valid user session required. If there is none, redirect to the auth page
@@ -581,56 +611,51 @@ async fn create_pairing(
         let mut conn = cache.get_async_connection().await.unwrap();
 
         /* input.otp need check or frondend check? */
-        if let Ok(otp) = input.otp.parse::<u16>() {
-            /* check if have got otp from nms(<-cmp) */
-            if let Ok(saved_otp) = conn.get::<&str, u16>("nms.pairing.otp").await {
-                if saved_otp == otp {
-                    return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
-                        .await
-                        .into_response();
-                }
+        let otp = input.otp;
+        /* check if have got otp from nms(<-cmp) */
+        if let Ok(saved_otp) = conn.get::<&str, String>("nms.pairing.otp").await {
+            if saved_otp == otp {
+                return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
+                    .await
+                    .into_response();
             }
-
-            let iot = IotPairingCfg {
-                wallet: opt.wallet_addr,
-                otp,
-            };
-
-            let msg = serde_json::to_string(&iot).unwrap();
-            conn.publish::<&str, &str, usize>("nms.shadow.update.pairing", &msg)
-                .await
-                .unwrap();
-
-            let mut sub_conn = conn.into_pubsub();
-            sub_conn.subscribe("nms.pairing.status").await.unwrap();
-            let mut sub_stream = sub_conn.on_message();
-
-            /*TODO, ui/ux display progress for this long-term job */
-            let resp = tokio::select! {
-                Some(res) = sub_stream.next() => {
-                    match res.get_payload::<String>() {
-                        Ok(status) => {
-                            if status.eq("success") {
-                                "rocket".to_string()
-                            }
-                            else {
-                                "thumbs down".to_string()
-                            }
-                        },
-                        _ => "pick".to_string(),
-                    }
-                },
-                _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
-            };
-
-            get_result_emoji(&format!("Pairing {}", resp), &resp)
-                .await
-                .into_response()
-        } else {
-            get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
-                .await
-                .into_response()
         }
+
+        let iot = IotPairingCfg {
+            wallet: opt.wallet_addr,
+            otp,
+        };
+
+        let msg = serde_json::to_string(&iot).unwrap();
+        conn.publish::<&str, &str, usize>("nms.shadow.update.pairing", &msg)
+            .await
+            .unwrap();
+
+        let mut sub_conn = conn.into_pubsub();
+        sub_conn.subscribe("nms.pairing.status").await.unwrap();
+        let mut sub_stream = sub_conn.on_message();
+
+        /*TODO, ui/ux display progress for this long-term job */
+        let resp = tokio::select! {
+            Some(res) = sub_stream.next() => {
+                match res.get_payload::<String>() {
+                    Ok(status) => {
+                        if status.eq("success") {
+                            "rocket".to_string()
+                        }
+                        else {
+                            "thumbs down".to_string()
+                        }
+                    },
+                    _ => "pick".to_string(),
+                }
+            },
+            _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+        };
+
+        get_result_emoji(&format!("Pairing {}", resp), &resp)
+            .await
+            .into_response()
     }
 }
 
@@ -758,10 +783,107 @@ async fn system_checking(
                             emoji = "rocket".to_string();
                         }
                     }
-                },
-                Err(_) => {},
+                }
+                Err(_) => {}
             }
         }
-        get_result_emoji("System Check...", &emoji).await.into_response()
+        get_result_emoji("System Check...", &emoji)
+            .await
+            .into_response()
+    }
+}
+
+const POR_TEMP: &str = std::include_str!("../templates/por.html");
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct PorCfg {
+    state: bool,
+}
+
+async fn _por_config(
+    user: Option<SimpleUser>,
+    Extension(cache): Extension<redis::Client>,
+) -> impl IntoResponse {
+    if user.is_none() {
+        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
+    } else {
+        let mut cfg = String::from("{}");
+        if let Ok(mut conn) = cache.get_async_connection().await {
+            cfg = conn
+                .get::<&str, String>("kdaemon.por.config")
+                .await
+                .unwrap_or_else(|_| "{}".into());
+        }
+        Html(POR_TEMP.replace("{{ getJSON }}", &cfg)).into_response()
+    }
+}
+
+// Valid user session required. If there is none, redirect to the auth page
+async fn por_wifi(
+    user: Option<SimpleUser>,
+    payload: Option<Json<PorCfg>>,
+    Extension(cache): Extension<redis::Client>,
+) -> impl IntoResponse {
+    if user.is_none() {
+        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
+    } else {
+        dbg!(&payload);
+
+        if let Some(Json(input)) = payload {
+            let msg = serde_json::to_string(&input).unwrap();
+            let mut resp = "thumbs down".to_string();
+
+            if let Ok(mut conn) = cache.get_async_connection().await {
+                match conn
+                    .set::<&str, &str, String>("kdaemon.por.config", &msg)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_e) => {
+                        debug!("db set kdaemon.por.config {}", &msg);
+                    }
+                }
+
+                conn.publish::<&str, &str, usize>("kdaemon.por.config", &msg)
+                    .await
+                    .unwrap();
+
+                let mut sub_conn = conn.into_pubsub();
+                sub_conn.subscribe("kdaemon.por.config.ack").await.unwrap();
+                let mut sub_stream = sub_conn.on_message();
+
+                resp = tokio::select! {
+                    Some(res) = sub_stream.next() => {
+                        match res.get_payload::<String>() {
+                            Ok(status) => {
+                                if status.eq("success") {
+                                    "rocket".to_string()
+                                }
+                                else {
+                                    "thumbs down".to_string()
+                                }
+                            },
+                            _ => "pick".to_string(),
+                        }
+                    },
+                    _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+                };
+            } else {
+                dbg!(&msg);
+            }
+
+            get_result_emoji("PoR service", &resp)
+                .await
+                .into_response()
+        } else {
+            let mut cfg = String::from(r#"{"state":true}"#);
+            if let Ok(mut conn) = cache.get_async_connection().await {
+                cfg = conn
+                    .get::<&str, String>("kdaemon.por.config")
+                    .await
+                    .unwrap_or_else(|_| "{}".into());
+            }
+            Html(POR_TEMP.replace("{{ getJson }}", &cfg)).into_response()
+        }
     }
 }

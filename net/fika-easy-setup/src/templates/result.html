@@ -1,70 +1,47 @@
 <!doctype html>
 <html>
+    <title>Result</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
     <head>
         <style>
-        html {
-            height: 100%;
-        }
-        body {
-            margin:0;
-            padding:0;
-            font-family: sans-serif;
-            background: linear-gradient(#141e30, #243b55);
-        }
-        .result-box {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 400px;
-            padding: 40px;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,.5);
-            box-sizing: border-box;
-            box-shadow: 0 15px 25px rgba(0,0,0,.6);
-            border-radius: 10px;
-        }
-        .result-box h2 {
-            margin: 0 0 30px;
-            padding: 0;
-            color: #fff;
-            text-align: center;
-        }
-        .result-box .emoji-box {
-            position: center;
-        }
-        /* ref: https://stackoverflow.com/questions/34594297/making-emojis-bigger-and-align-with-text */
-        img.emojione {
-            // Override any img styles to ensure Emojis are displayed inline
-            margin: 0px !important;
-            display: inline !important;
-            height: auto;
-            width: 100px;
-        }
-        p#show-emoji {
-            position: center;
-            border-top: 1px solid black;
-            border-bottom: 1px solid black;
-            display: inline-block;
-        }
-        span.emoji {
-            position: center;
-            font-size: 100px;
-            vertical-align: middle;
-            line-height: 2;
-        }
+            /* ref: https://stackoverflow.com/questions/34594297/making-emojis-bigger-and-align-with-text */
+            img.emojione {
+                // Override any img styles to ensure Emojis are displayed inline
+                margin: 0px !important;
+                display: inline !important;
+                height: auto;
+                width: 100px;
+            }
+            p#show-emoji {
+                position: center;
+                border-top: 1px solid black;
+                border-bottom: 1px solid black;
+                display: inline-block;
+            }
+            span.emoji {
+                position: center;
+                font-size: 100px;
+                vertical-align: middle;
+                line-height: 2;
+            }
         </style>
     </head>
-    <body>
-        <div class="result-box">
-            <h2>{{ result }}</h2>
-            <div class="emoji-box"><p id="show-emoji"><span class="emoji">{{ emoji }}</span></p></div>
+    <body class="w3-blue-gray">
+        <div id="content" class="w3-auto w3-center" style="width:33%;">
+            <div class="w3-container w3-card w3-indigo w3-margin-top">
+                <h1>{{ result }}</h1>
+            </div>
+            <div class="emoji-box w3-container w3-card w3-dark-gray">
+                <p id="show-emoji"><span class="emoji">{{ emoji }}</span></p>
+            </div>
         </div>
+
         <script
           src="https://code.jquery.com/jquery-3.6.0.min.js"
           integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
           crossorigin="anonymous"
         ></script>
-
         <script>
           $(document).ready(function () {
               function convert() {
