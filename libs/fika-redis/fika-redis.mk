@@ -60,7 +60,7 @@ endef
 
 define FIKA_REDIS_INSTALL_INIT_SYSV
 	$(INSTALL) -m 0755 -D package/longdong/libs/fika-redis/files/redis.init.buildroot \
-		$(TARGET_DIR)/etc/init.d/S50fika-redis
+		$(TARGET_DIR)/etc/init.d/fika-redis
 endef
 
 define FIKA_REDIS_INSTALL_INIT_SYSTEMD

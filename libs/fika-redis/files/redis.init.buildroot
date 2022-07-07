@@ -1,7 +1,10 @@
-#!/bin/sh
+#!/bin/sh /etc/rc.common
 #
 # start redis
 #
+
+START=50
+STOP=50
 
 start() {
 	printf "Starting fika-redis: "
@@ -20,20 +23,3 @@ restart() {
 	stop
 	start
 }
-
-case "$1" in
-	start)
-		start
-		;;
-	stop)
-		stop
-		;;
-	restart|reload)
-		restart
-		;;
-	*)
-		echo "Usage: $0 {start|stop|restart}"
-		exit 1
-esac
-
-exit $?
