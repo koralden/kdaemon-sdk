@@ -27,3 +27,6 @@ emojis = "0.4.0"
 anyhow = "1.0.57"
 thiserror = "1.0.31"
 futures-util = "0.3.21"
+nix = { version = "0.24.1", features = ["user"] }
+shadow = "0.0.1"
+pwhash = "1.0.0"

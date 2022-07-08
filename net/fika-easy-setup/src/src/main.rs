@@ -62,11 +62,11 @@ struct Opt {
     #[clap(short = 'r', long = "redis", default_value = "127.0.0.1:6379")]
     redis_addr: String,
 
-    #[clap(long = "username", default_value = "tester")]
+    #[clap(long = "username", default_value = "admin")]
     client_username: String,
 
-    #[clap(long = "password", default_value = "tester")]
-    client_password: String,
+    #[clap(long = "password"/*, default_value = "tester"*/)]
+    client_password: Option<String>,
 
     #[clap(
         short = 'w',
@@ -97,7 +97,7 @@ static API_PATH_POR_WIFI: &str = "/por/wifi";
 
 #[tokio::main]
 async fn main() {
-    let opt = Opt::parse();
+    let mut opt = Opt::parse();
     let log_level = &opt.log_level;
 
     tracing_subscriber::registry()
@@ -114,7 +114,7 @@ async fn main() {
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
     //let oauth_client = oauth_client();
-    let simple_client = simple_client(&opt);
+    let simple_client = simple_client(&mut opt);
 
     let app = Router::new()
         .route("/", get(index))
@@ -405,27 +405,27 @@ async fn do_simple_auth(
 
     let mut headers = HeaderMap::new();
 
-    if user.name == client.name && user.password == client.password {
-        // Create a new session filled with user data
-        let mut session = Session::new();
-        session.insert("user", &user).unwrap();
+    if user.name == client.name {
+        let matched = pwhash::unix::verify(&user.password, &client.password);
+        if matched {
+            // Create a new session filled with user data
+            let mut session = Session::new();
+            session.insert("user", &user).unwrap();
 
-        // Store session and get corresponding cookie
-        let cookie = store.store_session(session).await.unwrap().unwrap();
+            // Store session and get corresponding cookie
+            let cookie = store.store_session(session).await.unwrap().unwrap();
 
-        // Build the cookie
-        let cookie = format!("{}={}; SameSite=Lax; Path=/", COOKIE_NAME, cookie);
+            // Build the cookie
+            let cookie = format!("{}={}; SameSite=Lax; Path=/", COOKIE_NAME, cookie);
 
-        // Set cookie
-        headers.insert(SET_COOKIE, cookie.parse().unwrap());
+            // Set cookie
+            headers.insert(SET_COOKIE, cookie.parse().unwrap());
 
-        (headers, Redirect::to(API_PATH_SETUP_EASY))
-
-        //Html(std::include_str!("../templates/easy_setup.html"))
-        //Redirect::temporary(API_PATH_SETUP_EASY).into_response()
+            (headers, Redirect::to(API_PATH_SETUP_EASY))
+        } else {
+            (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
+        }
     } else {
-        //Html(std::include_str!("../templates/login.html"))
-        //Redirect::temporary("/auth/basic").into_response()
         (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
     }
 }
@@ -750,13 +750,26 @@ impl SimpleClient {
     }
 }
 
-fn simple_client(opt: &Opt) -> SimpleClient {
+fn simple_client(opt: &mut Opt) -> SimpleClient {
     let client_username = opt.client_username.clone();
     let client_username = env::var("CLIENT_ID").unwrap_or(client_username);
-    let client_password = opt.client_password.clone();
-    let client_password = env::var("CLIENT_SECRET").unwrap_or(client_password);
+    let password = opt.client_password.take();
+    let password = match password {
+        Some(p) => p,
+        None => {
+            match env::var("CLIENT_SECRET") {
+                Ok(p) => p,
+                Err(_) => {
+                    match shadow::Shadow::from_name(&client_username) {
+                        Some(s) => s.password,
+                        None => String::from(""),
+                    }
+                }
+            }
+        }
+    };
 
-    SimpleClient::new(client_username, client_password)
+    SimpleClient::new(client_username, password)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
