@@ -22,9 +22,6 @@
 
 msg=""
 code=404
-cmd="unknown"
-[ $# -ge 1 ] && cmd=$1 && shift
-
 
 account_cb() {
     act="unknown"
@@ -33,8 +30,14 @@ account_cb() {
     if [ "X$act" = "Xmodify" ]; then
         if [ $# -eq 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ modify"
-            msg=$(account_modify)
-            code=200
+
+            overwrite=$1 && shift
+            if [ "Xon" = "X$overwrite" -o "Xtrue" = "X$overwrite" ]; then
+                msg=$(account_modify $@)
+                code=200
+            else
+                logger -s -t fika-manager -p debug "[$0] nothing"
+            fi
         else
             logger -s -t fika-manager -p error "[$0] $@ modify"
             msg="invalid username or password"
@@ -63,12 +66,12 @@ wan_cb() {
         logger -s -t fika-manager -p debug "[$0] $@ wan dhcp"
         msg=$(wan_dhcp $@)
     elif [ "X$act" = "Xwwan" ]; then
-        if [ $# -ge 3 ]; then
+        if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wan wwan"
             msg=$(wan_wwan $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ wan wwan"
-            msg="invalid MAC address"
+            msg="invalid username or password"
             code=402
         fi
     else
@@ -103,45 +106,33 @@ wlan_cb() {
     fi
 }
 
-pairing_cb() {
-    act="unknown"
-    [ $# -ge 1 ] && act=$1 && shift
+main() {
+    cfg=$1 && shift
 
-    if [ "X$act" = "Xotp" ]; then
-        if [ $# -ge 1 ]; then
-            logger -s -t fika-manager -p debug "[$0] $@ pairing otp"
-            msg="TODO"
-        else
-            logger -s -t fika-manager -p error "[$0] $@ pairing otp"
-            msg="invalid OTP"
-            code=402
-        fi
-    elif [ "X$act" = "Xowner" ]; then
-        if [ $# -ge 2 ]; then
-            logger -s -t fika-manager -p debug "[$0] $@ pairing owner"
-            msg="TODO"
-        else
-            logger -s -t fika-manager -p error "[$0] $@ pairing owner"
-            msg="invalid wallet or GPS"
-            code=402
-        fi
+    type=$(echo $cfg | jq -r .wan_type)
+    if [ "X$type" = "X1" ]; then
+        username=$(echo $cfg | jq -r .wan_username)
+        password=$(echo $cfg | jq -r .wan_passwod)
+        wan_cb pppoe $username $password
+    elif [ "X$type" = "X2" ]; then
+        wan_cb wwan $username $password
     else
-        msg="pairing sub-cmd not support"
+        wan_cb dhcp
     fi
-}
-if [ "X$cmd" = "Xaccount" ]; then
-    account_cb $@
-elif [ "X$cmd" = "Xwan" ]; then
-    wan_cb $@
-elif [ "X$cmd" = "Xwlan" ]; then
-    wlan_cb $@
-elif [ "X$cmd" = "Xpairing" ]; then
-    pairing_cb $@
-else
-    msg="command not support"
-fi
 
-jq -rcM --null-input \
-    --arg msg "$msg" \
-    --argjson code "$code" \
-    '{ "message": $msg, "code": $code }'
+    pssid=$(echo $cfg | jq -r .wifi_ssid)
+    ppassword=$(echo $cfg | jq -r .wifi_password)
+    wlan_cb private $pssid $ppassword
+
+    overwrite=$(echo $cfg | jq -r .password_overwrite)
+    account_cb modify $overwrite $ppassword
+
+    redis-cli publish kdaemon.easy.setup.ack success
+
+    jq -rcM --null-input \
+        --arg msg "$msg" \
+        --argjson code "$code" \
+        '{ "message": $msg, "code": $code }'
+}
+
+main $@

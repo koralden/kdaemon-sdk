@@ -30,3 +30,5 @@ futures-util = "0.3.21"
 nix = { version = "0.24.1", features = ["user"] }
 shadow = "0.0.1"
 pwhash = "1.0.0"
+chrono = "0.4.19"
+fastrand = "1.7.0"

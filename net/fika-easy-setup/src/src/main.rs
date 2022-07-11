@@ -39,8 +39,10 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug/*, error, info, instrument*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use chrono::prelude::*;
+use std::iter::repeat_with;
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
@@ -82,6 +84,9 @@ struct Opt {
     certificate: String,
     #[clap(long = "private-key", default_value = "certs/key.pem")]
     private_key: String,
+
+    #[clap(long = "api-url", default_value = "https://fikapark.com/api/v1")]
+    api_url: String,
 }
 
 static COOKIE_NAME: &str = "SESSION";
@@ -493,7 +498,7 @@ async fn update_easy_setup(
                 .unwrap();
 
             let mut sub_conn = conn.into_pubsub();
-            sub_conn.subscribe("kdaemon.easy.setup").await.unwrap();
+            sub_conn.subscribe("kdaemon.easy.setup.ack").await.unwrap();
             let mut sub_stream = sub_conn.on_message();
 
             /*TODO, ui/ux display progress for this long-term job */
@@ -501,11 +506,11 @@ async fn update_easy_setup(
                 Some(res) = sub_stream.next() => {
                     //res.get_payload::<String>().unwrap(),
                     match res.get_payload::<String>() {
-                        Ok(_) => "hundred points".to_string(),
+                        Ok(_) => "rocket".to_string(),
                         _ => "NG".to_string(),
                     }
                 },
-                _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+                _ = time::sleep(Duration::from_secs(30)) => "hourglass not done".to_string(),
             };
 
             get_result_emoji("Setup Done", &resp).await.into_response()
@@ -550,6 +555,25 @@ async fn show_emoji(emoji: Option<Query<EmojiStr>>) -> impl IntoResponse {
 
 const PAIRING_TEMP: &str = std::include_str!("../templates/pairing.html");
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct IotPairingCfg {
+    //#[serde(rename = "wallet-address")]
+    wallet: Option<String>,
+    //#[serde(rename = "confirm-otp")]
+    otp: Option<String>,
+    expire: Option<DateTime<Utc>>,
+}
+
+async fn rest_get_otp(api_url: &str, wallet: &str) -> Result<IotPairingCfg> {
+    let client = reqwest::Client::new();
+    let data: IotPairingCfg = client
+        .get(format!("{}/otp/{}", api_url, wallet))
+        //.bearer_auth(token.access_token().secret())
+        .send().await?
+        .json::<IotPairingCfg>().await?;
+    Ok(data)
+}
+
 async fn show_pairing(
     user: Option<SimpleUser>,
     Extension(opt): Extension<Opt>,
@@ -557,12 +581,19 @@ async fn show_pairing(
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
     } else {
-        let wallet_addr = opt.wallet_addr.clone();
+        let otp = rest_get_otp(&opt.api_url, &opt.wallet_addr).await
+            .unwrap_or_else(|_|
+                    IotPairingCfg {
+                    wallet: Some(opt.wallet_addr.clone()),
+                    otp: Some(repeat_with(fastrand::alphanumeric).take(6).collect()),
+                    expire: Some(Utc::now() + chrono::Duration::seconds(300)),
+            });
 
-        let code = QrCode::new(wallet_addr.into_bytes()).unwrap();
+        let cfg = serde_json::to_string(&otp).unwrap();
+        let code = QrCode::new(cfg.into_bytes()).unwrap();
         let mut image = code
             .render()
-            .min_dimensions(360, 360)
+            .min_dimensions(60, 60)
             .max_dimensions(360, 360)
             .light_color(svg::Color("#696969"))
             .dark_color(svg::Color("#fff"))
@@ -571,14 +602,19 @@ async fn show_pairing(
             .into_bytes();
         image.push(b'\n');
 
+        let paired: String;
+        if otp.wallet != Some(opt.wallet_addr) {
+            paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, otp.wallet.as_ref().unwrap());
+        } else {
+            paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, otp.wallet.as_ref().unwrap());
+        }
+
         Html(
             PAIRING_TEMP
                 .replace("{{ content }}", &String::from_utf8_lossy(&image))
-                .replace(
-                    "{{ getJson }}",
-                    &String::from(r#"{"ownerId": "(check via APP)", "paired": false}"#),
-                )
-                .replace("{{ routerId }}", &opt.wallet_addr),
+                .replace("{{ getJson }}", &paired)
+                .replace("{{ otp }}", &otp.otp.unwrap())
+                .replace("{{ routerId }}", &otp.wallet.unwrap())
         )
         .into_response()
     }
@@ -586,14 +622,6 @@ async fn show_pairing(
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct PairingCfg {
-    otp: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct IotPairingCfg {
-    #[serde(rename = "wallet-address")]
-    wallet: String,
-    #[serde(rename = "confirm-otp")]
     otp: String,
 }
 
@@ -622,8 +650,9 @@ async fn create_pairing(
         }
 
         let iot = IotPairingCfg {
-            wallet: opt.wallet_addr,
-            otp,
+            wallet: Some(opt.wallet_addr),
+            expire: None,
+            otp: Some(otp),
         };
 
         let msg = serde_json::to_string(&iot).unwrap();
@@ -879,7 +908,7 @@ async fn por_wifi(
                             _ => "pick".to_string(),
                         }
                     },
-                    _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+                    _ = time::sleep(Duration::from_secs(30)) => "hourglass not done".to_string(),
                 };
             } else {
                 dbg!(&msg);

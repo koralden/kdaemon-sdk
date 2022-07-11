@@ -14,7 +14,7 @@ start() {
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \
 		-x /usr/bin/fika-easy-setup -- \
-                -a $myLanIp -w TODO-BINANCE-WALLET \
+                -a $myLanIp -w 0x365962cd383a593975E743fD59Bbf2C1Bc141CF5 \
                 --certificate /etc/fika_easy_setup/certs/cert.pem \
                 --private-key /etc/fika_easy_setup/certs/key.pem \
                 --static-dir /etc/fika_easy_setup/templates

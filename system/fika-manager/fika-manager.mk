@@ -24,7 +24,7 @@ endef
 FIKA_MANAGER_MY_DIR=package/longdong/system/fika-manager/files
 FIKA_MANAGER_MY_SCRIPT=easy_setup.sh heartbeat.sh common.sh captive-portal.sh \
 	     maker.sh provision.sh remote_manage.sh runtime_statistics.sh \
-	     system_checking.sh \
+	     system_checking.sh por_config.sh \
 	     thirdparty/firewall.sh thirdparty/network.sh thirdparty/system.sh
 define FIKA_MANAGER_INSTALL_MISC
 	$(INSTALL) -m 0755 -D $(FIKA_MANAGER_MY_DIR)/fika-manager.init \

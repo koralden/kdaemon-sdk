@@ -4,8 +4,12 @@ version = "0.1.0"
 thirdparty = "longdong2"
 
 [[subscribe]]
-topic = "easy-setup"
+topic = "kdaemon.easy.setup"
 path = "/etc/fika_manager/easy_setup.sh"
+
+[[subscribe]]
+topic = "kdaemon.por.config"
+path = "/etc/fika_manager/por_config.sh"
 
 [[subscribe]]
 topic = "captive-portal"

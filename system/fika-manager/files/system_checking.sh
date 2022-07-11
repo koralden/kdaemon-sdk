@@ -5,7 +5,7 @@ message="TODO"
 
 payload=$(jq -rcM --null-input \
     --argjson code "$code" \
-    --argjson message "$message" \
+    --arg message "$message" \
     '{ "code": $code, "message": $message }')
 
-redis-cli SET kdaemon.system.checking
+redis-cli SET kdaemon.system.checking $payload
