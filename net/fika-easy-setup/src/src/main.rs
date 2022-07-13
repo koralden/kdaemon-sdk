@@ -510,7 +510,7 @@ async fn update_easy_setup(
                         _ => "NG".to_string(),
                     }
                 },
-                _ = time::sleep(Duration::from_secs(30)) => "hourglass not done".to_string(),
+                _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
             };
 
             get_result_emoji("Setup Done", &resp).await.into_response()
@@ -908,7 +908,7 @@ async fn por_wifi(
                             _ => "pick".to_string(),
                         }
                     },
-                    _ = time::sleep(Duration::from_secs(30)) => "hourglass not done".to_string(),
+                    _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
                 };
             } else {
                 dbg!(&msg);

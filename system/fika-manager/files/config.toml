@@ -16,12 +16,16 @@ topic = "captive-portal"
 path = "/etc/fika_manager/captive-portal.sh"
 
 [[subscribe]]
-topic = "cmp/remote-manage"
-path = "/etc/fika_manager/remote_manage.sh"
+topic = "nms.shadow.delta.remote-manage"
+path = "/etc/fika_manager/nms_remote_manage.sh"
 
 [[subscribe]]
-topic = "cmp/pairing"
+topic = "nms.shadow.delta.pairing"
 path = "/etc/fika_manager/cmp_pairing.sh"
+
+[[subscribe]]
+topic = "nms.shadow.delta.honest-challenge"
+path = "/etc/fika_manager/hcs_honest_challenge.sh"
 
 [[task]]
 topic = "nms.shadow.update.provision"

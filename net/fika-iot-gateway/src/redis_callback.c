@@ -100,7 +100,7 @@ static void update_shadow_callback(redisAsyncContext *c, void *r, void *privdata
             //ret = hdp->cb_publisher(hdp->cb_hdp, hdp->cb_extra);
             char *topic = reply->element[2]->str + strlen("nms.shadow.update.");
             char *value = reply->element[3]->str;
-            ret = aws_shadow_publish_dynamic(topic, value);
+            ret = aws_publish_shadow_update(topic, value);
         //}
         if (ret >= 0) {
             /*redisAsyncCommand(gateway, NULL, NULL, "LPUSH %s %s",
@@ -108,6 +108,66 @@ static void update_shadow_callback(redisAsyncContext *c, void *r, void *privdata
             uv_async_send(&async_gateway);
         }
     } else {
+    }
+
+    return;
+}
+
+static void shadow_raw_callback(redisAsyncContext *c, void *r, void *privdata)
+{
+    redisReply *reply = r;
+    redis_handle_t *hdp = (redis_handle_t *)privdata;
+
+    if (!(reply && reply->element)) {
+        printf("%s: null reply\n", __func__);
+        return;
+    }
+
+    if (!(reply->element[0]->str && reply->element[0]->len)) {
+        printf("%s: element[0] zero length\n", __func__);
+        return;
+    }
+
+    if (strcmp(reply->element[0]->str,"psubscribe") == 0) {
+        printf("PSUBSCRIBE %s completed\n", reply->element[1]->str);
+    } else if (strcmp(reply->element[0]->str,"unpsubscribe") == 0) {
+        printf("UNPSUBSCRIBE %s completed\n", reply->element[1]->str);
+    } else if (strcmp(reply->element[0]->str,"pmessage") == 0) {
+#define CMP_SHADOW_RAW  "nms.shadow.raw."
+        char *topic;
+        size_t topic_len;
+        char *j_payload;
+        size_t j_payload_len;
+
+        if ((reply->element[2]->str == NULL)
+                || (reply->element[2]->len <= strlen(CMP_SHADOW_RAW))) {
+            printf("%s: CLASSIC-SHADOW due to element[2] zero length\n", __func__);
+        }
+
+        if (!(reply->element[3]->str && reply->element[3]->len)) {
+            printf("%s: element[3] zero length\n", __func__);
+            return;
+        }
+
+        printf("PSUBSCRIBE (p)message RAW %s %s %s\n",
+                reply->element[1]->str,
+                reply->element[2]->str,
+                reply->element[3]->str);
+
+        topic = reply->element[2]->str + strlen(CMP_SHADOW_RAW);
+        topic_len = reply->element[2]->len - strlen(CMP_SHADOW_RAW);
+        j_payload = reply->element[3]->str;
+        j_payload_len = reply->element[3]->len;
+
+        printf("[debug][%s]: topic/topic_len/j_payload/j_payload_len = %s/%u/%s/%u\n",
+                __func__,
+                topic, topic_len, j_payload, j_payload_len);
+
+        if (aws_publish_shadow_raw(topic, topic_len, j_payload, j_payload_len) >= 0) {
+            uv_async_send(&async_gateway);
+        }
+    } else {
+        printf("UNKNOWN %s \n", reply->element[0]->str);
     }
 
     return;
@@ -222,6 +282,8 @@ redis_handle_t *redis_init(void *event_loop, char *server_ip, int port)
             "PSUBSCRIBE nms.mqtt.update.*");
     redisAsyncCommand(c, update_shadow_callback, NULL,
             "PSUBSCRIBE nms.shadow.update.*");
+    redisAsyncCommand(c, shadow_raw_callback, NULL,
+            "PSUBSCRIBE nms.shadow.raw.*");
 
     redisAsyncCommand(gateway, NULL, NULL, "PUBLISH service.cmp ready");
     redisAsyncCommand(gateway, NULL, NULL, "SET service.cmp ready");
@@ -259,8 +321,8 @@ int redis_publish_shadow_message(const char *type,
 
     char shadow_str[256];
     memset(shadow_str, 0x0, sizeof(shadow_str));
-    snprintf(shadow_str, sizeof(shadow_str) - 1, "nms.shadow.%s.%.*s",
-            type, shadow_len, shadow);
+    snprintf(shadow_str, sizeof(shadow_str) - 1, "nms.shadow.%.*s/%s",
+            shadow_len, shadow, type);
 
     /*  pass binary safe strings in a command, the %b specifier can be used.
      *  Together with a pointer to the string, it requires a size_t length

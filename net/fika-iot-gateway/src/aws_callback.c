@@ -182,9 +182,6 @@ static void deleteRejectedHandler( MQTTPublishInfo_t * pPublishInfo )
     uint32_t outValueLength = 0U;
     long errorCode = 0L;
 
-    assert( pPublishInfo != NULL );
-    assert( pPublishInfo->pPayload != NULL );
-
     LogInfo( ( "/delete/rejected json payload:%s.", ( const char * ) pPublishInfo->pPayload ) );
 
     /* The payload will look similar to this:
@@ -196,24 +193,13 @@ static void deleteRejectedHandler( MQTTPublishInfo_t * pPublishInfo )
      * }
      */
 
-    /* Make sure the payload is a valid json document. */
-    result = JSON_Validate( ( const char * ) pPublishInfo->pPayload,
-                            pPublishInfo->payloadLength );
-
-    if( result == JSONSuccess )
-    {
-        /* Then we start to get the version value by JSON keyword "version". */
-        result = JSON_Search( ( char * ) pPublishInfo->pPayload,
-                              pPublishInfo->payloadLength,
-                              SHADOW_DELETE_REJECTED_ERROR_CODE_KEY,
-                              SHADOW_DELETE_REJECTED_ERROR_CODE_KEY_LENGTH,
-                              &pOutValue,
-                              ( size_t * ) &outValueLength );
-    }
-    else
-    {
-        LogError( ( "The json document is invalid!!" ) );
-    }
+    /* Then we start to get the version value by JSON keyword "version". */
+    result = JSON_Search( ( char * ) pPublishInfo->pPayload,
+            pPublishInfo->payloadLength,
+            SHADOW_DELETE_REJECTED_ERROR_CODE_KEY,
+            SHADOW_DELETE_REJECTED_ERROR_CODE_KEY_LENGTH,
+            &pOutValue,
+            ( size_t * ) &outValueLength );
 
     if( result == JSONSuccess )
     {
@@ -250,9 +236,6 @@ static void updateDeltaHandler( MQTTPublishInfo_t * pPublishInfo,
     uint32_t outValueLength = 0U;
     JSONStatus_t result = JSONSuccess;
 
-    assert( pPublishInfo != NULL );
-    assert( pPublishInfo->pPayload != NULL );
-
     LogInfo( ( "/update/delta json payload:%s.", ( const char * ) pPublishInfo->pPayload ) );
 
     /* The payload will look similar to this:
@@ -270,19 +253,6 @@ static void updateDeltaHandler( MQTTPublishInfo_t * pPublishInfo,
      *      "clientToken": "388062"
      *  }
      */
-
-    /* Make sure the payload is a valid json document. */
-    result = JSON_Validate( ( const char * ) pPublishInfo->pPayload,
-                            pPublishInfo->payloadLength );
-
-    if( result != JSONSuccess ) {
-        LogError( ( "The json document is invalid!!" ) );
-        return;
-    }
-
-    redis_publish_shadow_message("delta",
-            shadow, shadow_len,
-            pPublishInfo->pPayload, pPublishInfo->payloadLength);
 
     /* Then we start to get the version value by JSON keyword "version". */
     result = JSON_Search( ( char * ) pPublishInfo->pPayload,
@@ -339,9 +309,6 @@ static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo,
     uint32_t receivedToken = 0U;
     JSONStatus_t result = JSONSuccess;
 
-    assert( pPublishInfo != NULL );
-    assert( pPublishInfo->pPayload != NULL );
-
     LogInfo( ( "/update/accepted json payload:%s.", ( const char * ) pPublishInfo->pPayload ) );
 
     /* Handle the reported state with state change in /update/accepted topic.
@@ -367,32 +334,16 @@ static void updateAcceptedHandler( MQTTPublishInfo_t * pPublishInfo,
      *  }
      */
 
-    /* Make sure the payload is a valid json document. */
-    result = JSON_Validate( ( const char * ) pPublishInfo->pPayload,
-                            pPublishInfo->payloadLength );
+    /* Get clientToken from json documents. */
+    result = JSON_Search( ( char * ) pPublishInfo->pPayload,
+            pPublishInfo->payloadLength,
+            "clientToken",
+            sizeof( "clientToken" ) - 1,
+            &outValue,
+            ( size_t * ) &outValueLength );
 
     if( result == JSONSuccess )
     {
-        /* Get clientToken from json documents. */
-        result = JSON_Search( ( char * ) pPublishInfo->pPayload,
-                              pPublishInfo->payloadLength,
-                              "clientToken",
-                              sizeof( "clientToken" ) - 1,
-                              &outValue,
-                              ( size_t * ) &outValueLength );
-    }
-    else
-    {
-        LogError( ( "Invalid json documents !!" ) );
-        eventCallbackError = true;
-    }
-
-    if( result == JSONSuccess )
-    {
-        redis_publish_shadow_message("accepted",
-                shadow, shadow_len,
-                pPublishInfo->pPayload, pPublishInfo->payloadLength);
-
         LogInfo( ( "clientToken: %.*s", outValueLength,
                    outValue ) );
 
@@ -457,51 +408,107 @@ static void eventCallback( MQTTContext_t * pMqttContext,
         LogInfo( ( "pPublishInfo->pTopicName:%s.", pDeserializedInfo->pPublishInfo->pTopicName ) );
 
         /* Let the Device Shadow library tell us whether this is a device shadow message. */
-        if( SHADOW_SUCCESS == Shadow_MatchTopicString( pDeserializedInfo->pPublishInfo->pTopicName,
-                                                       pDeserializedInfo->pPublishInfo->topicNameLength,
-                                                       &messageType,
-                                                       &pThingName,
-                                                       &thingNameLength,
-                                                       &pShadowName,
-                                                       &shadowNameLength ) )
+        if( SHADOW_SUCCESS == Shadow_MatchTopicString(
+                    pDeserializedInfo->pPublishInfo->pTopicName,
+                    pDeserializedInfo->pPublishInfo->topicNameLength,
+                    &messageType,
+                    &pThingName,
+                    &thingNameLength,
+                    &pShadowName,
+                    &shadowNameLength ) )
         {
+            MQTTPublishInfo_t *pPublishInfo = pDeserializedInfo->pPublishInfo;
+            JSONStatus_t result;
+            char *rtype;
+
+            if (!(pPublishInfo && pPublishInfo->pPayload
+                        && pPublishInfo->payloadLength)) {
+                LogError( ( "The topic public info/payload is invalid!!" ) );
+                return;
+            }
+
+            /* Make sure the payload is a valid json document. */
+            result = JSON_Validate( ( const char * ) pPublishInfo->pPayload,
+                    pPublishInfo->payloadLength );
+
+            if( result != JSONSuccess ) {
+                LogError( ( "The json document is invalid!!" ) );
+                return;
+            }
+
+            LogDebug( ( "eventCallback: %u/%s/%s/%s[%u]",
+                        messageType, pThingName, pShadowName,
+                        pPublishInfo->pPayload, pPublishInfo->payloadLength) );
+
             /* Upon successful return, the messageType has been filled in. */
-            if( messageType == ShadowMessageTypeUpdateDelta )
-            {
-                /* Handler function to process payload. */
-                updateDeltaHandler( pDeserializedInfo->pPublishInfo,
-                        pShadowName, shadowNameLength );
+            switch (messageType) {
+                case ShadowMessageTypeGetAccepted:
+                    {
+                        rtype = "get/accepted";
+                    }
+                    break;
+                case ShadowMessageTypeGetRejected:
+                    {
+                        rtype = "get/rejected";
+                    }
+                    break;
+                case ShadowMessageTypeDeleteAccepted:
+                    {
+                        LogInfo( ( "Received an MQTT incoming publish on /delete/accepted topic." ) );
+                        shadowDeleted = true;
+                        deleteResponseReceived = true;
+                        rtype = "delete/accepted";
+                    }
+                    break;
+                case ShadowMessageTypeDeleteRejected:
+                    {
+                        /* Handler function to process payload. */
+                        deleteRejectedHandler( pPublishInfo );
+                        deleteResponseReceived = true;
+                        rtype = "delete/rejected";
+                    }
+                    break;
+                case ShadowMessageTypeUpdateAccepted:
+                    {
+                        /* Handler function to process payload. */
+                        updateAcceptedHandler( pPublishInfo,
+                                pShadowName, shadowNameLength );
+                        rtype = "update/accepted";
+                    }
+                    break;
+                case ShadowMessageTypeUpdateRejected:
+                    {
+                        LogInfo( ( "/update/rejected json payload:%s.", ( const char * ) pPublishInfo->pPayload ) );
+                        rtype = "update/rejected";
+                    }
+                    break;
+                case ShadowMessageTypeUpdateDocuments:
+                    {
+                        LogInfo( ( "/update/documents json payload:%s.", ( const char * ) pPublishInfo->pPayload ) );
+                        rtype = "update/document";
+                    }
+                    break;
+                case ShadowMessageTypeUpdateDelta:
+                    {
+                        /* Handler function to process payload. */
+                        updateDeltaHandler( pPublishInfo,
+                                pShadowName, shadowNameLength );
+                        rtype = "update/delta";
+                    }
+                    break;
+                default:
+                    {
+                        LogInfo( ( "Other message type:%d !!", messageType ) );
+                        rtype = NULL;
+                    }
             }
-            else if( messageType == ShadowMessageTypeUpdateAccepted )
-            {
-                /* Handler function to process payload. */
-                updateAcceptedHandler( pDeserializedInfo->pPublishInfo,
-                        pShadowName, shadowNameLength );
+
+            if (rtype != NULL) {
+                redis_publish_shadow_message(rtype,
+                        pShadowName, shadowNameLength,
+                        pPublishInfo->pPayload, pPublishInfo->payloadLength);
             }
-            else if( messageType == ShadowMessageTypeUpdateDocuments )
-            {
-                LogInfo( ( "/update/documents json payload:%s.", ( const char * ) pDeserializedInfo->pPublishInfo->pPayload ) );
-            }
-            else if( messageType == ShadowMessageTypeUpdateRejected )
-            {
-                LogInfo( ( "/update/rejected json payload:%s.", ( const char * ) pDeserializedInfo->pPublishInfo->pPayload ) );
-            }
-            else if( messageType == ShadowMessageTypeDeleteAccepted )
-            {
-                LogInfo( ( "Received an MQTT incoming publish on /delete/accepted topic." ) );
-                shadowDeleted = true;
-                deleteResponseReceived = true;
-            }
-            else if( messageType == ShadowMessageTypeDeleteRejected )
-            {
-                /* Handler function to process payload. */
-                deleteRejectedHandler( pDeserializedInfo->pPublishInfo );
-                deleteResponseReceived = true;
-            }
-            else
-            {
-                LogInfo( ( "Other message type:%d !!", messageType ) );
-            }
+
         }
         else
         {
@@ -517,9 +524,39 @@ static void eventCallback( MQTTContext_t * pMqttContext,
 
 /*-----------------------------------------------------------*/
 
+static ShadowStatus_t xxxx( ShadowTopicStringType_t topicType,
+        const char * pThingName,
+        uint8_t thingNameLength,
+        const char * pShadowName,
+        uint8_t shadowNameLength,
+        const char * pTopicBuffer,
+        const uint16_t * pOutLength )
+{
+    ShadowStatus_t shadowStatus = SHADOW_BAD_PARAMETER;
+
+    if( ( pTopicBuffer == NULL ) ||
+            ( pThingName == NULL ) ||
+            ( thingNameLength == 0U ) ||
+            ( ( pShadowName == NULL ) && ( shadowNameLength > 0U ) ) ||
+            ( topicType >= ShadowTopicStringTypeMaxNum ) ||
+            ( pOutLength == NULL ) )
+    {
+        LogError( ( "Invalid input parameters pTopicBuffer: %p, pThingName: %p, thingNameLength: %u,\
+                    pShadowName: %p, shadowNameLength: %u, topicType: %d, pOutLength: %p.",
+                    ( void * ) pTopicBuffer,
+                    ( void * ) pThingName,
+                    ( unsigned int ) thingNameLength,
+                    ( void * ) pShadowName,
+                    ( unsigned int ) shadowNameLength,
+                    ( int ) topicType,
+                    ( void * ) pOutLength ) );
+    }
+}
+
+
 static aws_handle_t priv_aws_hdr;
 
-static int classic_topic_subscribe(void)
+/*static int classic_topic_subscribe(void)
 {
     int ret = -1;
     ShadowStatus_t shadowStatus = SHADOW_SUCCESS;
@@ -527,9 +564,14 @@ static int classic_topic_subscribe(void)
     uint16_t bufferSize = SHADOW_TOPIC_MAX_LENGTH;
     uint16_t outLength = 0;
 
+    shadowStatus = xxxx(ShadowTopicStringTypeUpdateDelta,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            NULL, 0,
+            topicBuffer, &outLength);
+
     shadowStatus = Shadow_AssembleTopicString(ShadowTopicStringTypeUpdateDelta,
             priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
-            SHADOW_NAME_CLASSIC, strlen(SHADOW_NAME_CLASSIC),
+            NULL, 0,
             topicBuffer, bufferSize,
             &outLength);
 
@@ -537,10 +579,11 @@ static int classic_topic_subscribe(void)
         ret = aws_topic_subscribe(topicBuffer, outLength);
     }
     else {
-        LogError( ( "classic_topic_subscribe(%s) update/delta fail.", SHADOW_NAME_CLASSIC) );
+        LogError( ( "classic_topic_subscribe(%s) update/delta fail...%u",
+                    SHADOW_NAME_CLASSIC, shadowStatus) );
     }
     return ret;
-}
+}*/
 
 static int iot_init(void *vcfg)
 {
@@ -553,7 +596,7 @@ static int iot_init(void *vcfg)
         return -1;
     }
 
-    ret = classic_topic_subscribe();
+    //ret = classic_topic_subscribe();
 
     return 0;
 }
@@ -581,7 +624,7 @@ static void iot_timer_loop(uv_timer_t *timer)
     static int first = 1;
 
     if (first == 1) {
-        aws_shadow_publish_dynamic("provision",
+        aws_publish_shadow_update("provision",
                 "{\"sdk-version\":\"0.01.00\",\"ap-wallet-address\":\"not-real\"}");
         first = 0;
     }
@@ -601,7 +644,7 @@ static void iot_timer_loop(uv_timer_t *timer)
                 uptime);
         if (err > 0) {
             payload[err + 1] = '\0';
-            aws_shadow_publish_dynamic("heartbeat", payload);
+            aws_publish_shadow_update("heartbeat", payload);
         }
     }
     idle->timer_cnt++;
@@ -709,7 +752,10 @@ int aws_publish(void *hdp, void *extra)
     return -1;
 }
 
-int aws_shadow_subscribe_dynamic(char *topic)
+int aws_shadow_subscribe_assembly(
+        ShadowTopicStringType_t stype,
+        char *thing, size_t thing_sz,
+        char *topic, size_t topic_sz)
 {
     int ret = -1;
     ShadowStatus_t shadowStatus = SHADOW_SUCCESS;
@@ -717,43 +763,67 @@ int aws_shadow_subscribe_dynamic(char *topic)
     uint16_t bufferSize = SHADOW_TOPIC_MAX_LENGTH;
     uint16_t outLength = 0;
 
-    shadowStatus = Shadow_AssembleTopicString(ShadowTopicStringTypeUpdateDelta,
-            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
-            topic, strlen(topic),
+    shadowStatus = Shadow_AssembleTopicString(stype,
+            thing, thing_sz, topic, topic_sz,
             topicBuffer, bufferSize,
             &outLength);
 
     if (shadowStatus == SHADOW_SUCCESS) {
         ret = aws_topic_subscribe(topicBuffer, outLength);
     }
-    else {
+    return ret;
+}
+
+int aws_shadow_subscribe_dynamic(char *topic)
+{
+    int ret;
+
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeUpdateDelta,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            topic, strlen(topic));
+    if (ret < 0) {
         LogError( ( "aws_shadow_subscribe_dynamic update/delta fail.") );
     }
 
-    shadowStatus = Shadow_AssembleTopicString(ShadowTopicStringTypeUpdateAccepted,
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeUpdateAccepted,
             priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
-            topic, strlen(topic),
-            topicBuffer, bufferSize,
-            &outLength);
-
-    if (shadowStatus == SHADOW_SUCCESS) {
-        ret = aws_topic_subscribe(topicBuffer, outLength);
-    }
-    else {
+            topic, strlen(topic));
+    if (ret < 0) {
         LogError( ( "aws_shadow_subscribe_dynamic update/accepted fail.") );
     }
 
-    shadowStatus = Shadow_AssembleTopicString(ShadowTopicStringTypeUpdateRejected,
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeUpdateRejected,
             priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
-            topic, strlen(topic),
-            topicBuffer, bufferSize,
-            &outLength);
-
-    if (shadowStatus == SHADOW_SUCCESS) {
-        ret = aws_topic_subscribe(topicBuffer, outLength);
-    }
-    else {
+            topic, strlen(topic));
+    if (ret < 0) {
         LogError( ( "aws_shadow_subscribe_dynamic update/rejected fail.") );
+    }
+
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeDeleteAccepted,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            topic, strlen(topic));
+    if (ret < 0) {
+        LogError( ( "aws_shadow_subscribe_dynamic delete/accepted fail.") );
+    }
+
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeDeleteRejected,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            topic, strlen(topic));
+    if (ret < 0) {
+        LogError( ( "aws_shadow_subscribe_dynamic delete/rejected fail.") );
+    }
+
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeGetAccepted,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            topic, strlen(topic));
+    if (ret < 0) {
+        LogError( ( "aws_shadow_subscribe_dynamic delete/rejected fail.") );
+    }
+    ret = aws_shadow_subscribe_assembly(ShadowTopicStringTypeGetRejected,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            topic, strlen(topic));
+    if (ret < 0) {
+        LogError( ( "aws_shadow_subscribe_dynamic delete/rejected fail.") );
     }
     return ret;
 }
@@ -766,7 +836,7 @@ int aws_shadow_subscribe_dynamic(char *topic)
     "\"clientToken\":\"%06lu\"" \
     "}"
 
-int aws_shadow_publish_dynamic(char *topic, char *value)
+int aws_publish_shadow_update(char *topic, char *value)
 {
     int ret = -1;
     ShadowStatus_t shadowStatus = SHADOW_SUCCESS;
@@ -802,5 +872,97 @@ int aws_shadow_publish_dynamic(char *topic, char *value)
     else {
         LogError( ( "aws_shadow_subscribe_dynamic fail.") );
     }
+    return ret;
+}
+
+int json_parse_fetch(char *payload, size_t p_len,
+        char *key, size_t k_len,
+        char **out_ptr, size_t *out_len)
+{
+    JSONStatus_t result;
+
+    result = JSON_Validate((const char *)payload, p_len);
+    if( result != JSONSuccess ) {
+        LogError( ( "The json document is invalid!!" ) );
+        return -1;
+    }
+
+    result = JSON_Search(payload, p_len, key, k_len,
+            out_ptr, out_len);
+
+    return (result == JSONSuccess) ? 0 : -1;
+}
+
+int aws_publish_shadow_raw(char *topic, size_t topic_len,
+        char *j_payload, size_t j_payload_len)
+{
+    int ret = -1;
+    JSONStatus_t result;
+    ShadowStatus_t shadowStatus = SHADOW_SUCCESS;
+    char topicBuffer[ SHADOW_TOPIC_MAX_LENGTH ] = { 0 };
+    uint16_t bufferSize = SHADOW_TOPIC_MAX_LENGTH;
+    uint16_t outLength = 0;
+    char *type_ptr;
+    uint32_t type_len;
+    ShadowTopicStringType_t type;
+    char *report;
+    uint32_t report_len;
+
+    /* topic && topic_len zero for class-shadow */
+    if (!(j_payload && j_payload_len))
+        return ret;
+
+    ret = json_parse_fetch(j_payload, j_payload_len,
+            "type", (( uint16_t )(sizeof("type") - 1)),
+            &type_ptr, (size_t *)&type_len);
+
+    if (ret < 0) {
+        LogError(("type not found from %.*s",
+                    j_payload_len, j_payload));
+
+        return ret;
+    }
+
+    type = strtoul(type_ptr, NULL, 10 );
+    printf("[debug][%s]: type=%u\n", __func__, type);
+
+    if (type != ShadowTopicStringTypeGet) {
+        result = JSON_Search(j_payload, j_payload_len,
+                "report", (( uint16_t )(sizeof("report") - 1)),
+                &report, (size_t *)&report_len);
+
+        if (result != JSONSuccess) {
+            LogError(("report not found from %.*s",
+                        j_payload_len, j_payload));
+
+            return -1;
+        }
+
+        result = JSON_Validate((const char *)report, report_len);
+        if( result != JSONSuccess ) {
+            LogError(("report NOT json document %.*s",
+                        report_len, report));
+            return -1;
+        }
+    }
+    /*printf("[debug][%s]: type/report = %s[%u]/%s[%u]\n",
+            __func__,
+            type_ptr, type_len,
+            report, report_len);
+
+    type = strtoul(type_ptr, NULL, 10 );*/
+
+    shadowStatus = Shadow_AssembleTopicString(type,
+            priv_aws_hdr.thing, strlen(priv_aws_hdr.thing),
+            topic, topic_len, topicBuffer,
+            bufferSize, &outLength);
+
+    if (shadowStatus != SHADOW_SUCCESS) {
+        LogError( ( "aws_shadow_subscribe_dynamic fail.") );
+        return -1;
+    }
+
+    ret = aws_topic_publish(topicBuffer, outLength,
+            report, report_len);
     return ret;
 }

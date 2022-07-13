@@ -705,9 +705,9 @@ int32_t aws_topic_subscribe(const char * pTopicFilter,
 
     /* Send SUBSCRIBE packet. */
     mqttStatus = MQTT_Subscribe( pMqttContext,
-                                 pSubscriptionList,
-                                 sizeof( pSubscriptionList ) / sizeof( MQTTSubscribeInfo_t ),
-                                 globalSubscribePacketIdentifier );
+            pSubscriptionList,
+            sizeof( pSubscriptionList ) / sizeof( MQTTSubscribeInfo_t ),
+            globalSubscribePacketIdentifier );
 
     if( mqttStatus != MQTTSuccess )
     {
