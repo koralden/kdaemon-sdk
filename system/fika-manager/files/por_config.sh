@@ -16,6 +16,8 @@ main() {
         msg=$(wlan_guest_off)
         code=200
     fi
+
+    [ $code -eq 200 ] && network_apply
     redis-cli publish kdaemon.por.config.ack success
 
     jq -rcM --null-input \

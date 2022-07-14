@@ -57,6 +57,7 @@ wan_cb() {
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wan pppoe"
             msg=$(wan_pppoe $@)
+            code=200
         else
             logger -s -t fika-manager -p error "[$0] $@ wan pppoe"
             msg="invalid username or password"
@@ -87,6 +88,7 @@ wlan_cb() {
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wlan private"
             msg=$(wlan_private $@)
+            code=200
         else
             logger -s -t fika-manager -p error "[$0] $@ wlan private"
             msg="invalid SSID or PSK"
@@ -123,6 +125,8 @@ main() {
     pssid=$(echo $cfg | jq -r .wifi_ssid)
     ppassword=$(echo $cfg | jq -r .wifi_password)
     wlan_cb private $pssid $ppassword
+
+    [ $code -eq 200 ] && network_apply
 
     overwrite=$(echo $cfg | jq -r .password_overwrite)
     account_cb modify $overwrite $ppassword
