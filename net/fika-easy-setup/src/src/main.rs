@@ -43,6 +43,7 @@ use tracing::{debug/*, error, info, instrument*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use chrono::prelude::*;
 use std::iter::repeat_with;
+use std::sync::{Arc, Mutex};
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
@@ -64,8 +65,8 @@ struct Opt {
     #[clap(short = 'r', long = "redis", default_value = "127.0.0.1:6379")]
     redis_addr: String,
 
-    #[clap(long = "username", default_value = "admin")]
-    client_username: String,
+    #[clap(long = "username"/*, default_value = "admin"*/)]
+    client_username: Option<String>,
 
     #[clap(long = "password"/*, default_value = "tester"*/)]
     client_password: Option<String>,
@@ -119,7 +120,8 @@ async fn main() {
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
     //let oauth_client = oauth_client();
-    let simple_client = simple_client(&mut opt);
+    //let simple_client = simple_client(&mut opt);
+    let simple_auth = SimpleAuth::new(opt.client_username.take(), opt.client_password.take());
 
     let app = Router::new()
         .route("/", get(index))
@@ -146,7 +148,7 @@ async fn main() {
         .route(API_PATH_POR_WIFI, get(por_wifi).post(por_wifi))
         .layer(Extension(store))
         .layer(Extension(cache))
-        .layer(Extension(simple_client))
+        .layer(Extension(Arc::new(simple_auth)))
         .layer(Extension(opt.clone()))
         .merge(axum_extra::routing::SpaRouter::new(
             "/__res__",
@@ -403,15 +405,22 @@ where
 
 async fn do_simple_auth(
     Form(user): Form<SimpleUser>,
-    Extension(client): Extension<SimpleClient>,
+    Extension(auth): Extension<Arc<SimpleAuth>>,
     Extension(store): Extension<MemoryStore>,
 ) -> impl IntoResponse /*Html<&'static str>*/ {
     dbg!(&user);
 
     let mut headers = HeaderMap::new();
 
-    if user.name == client.name {
-        let matched = pwhash::unix::verify(&user.password, &client.password);
+    let auth_name = auth.name.clone();
+    let auth_password = match auth.get_password() {
+        Some(p) => p,
+        None => String::from(""),
+    };
+
+    if user.name == auth_name {
+        debug!("[debug] compare password = {}", auth_password);
+        let matched = pwhash::unix::verify(&user.password, &auth_password);
         if matched {
             // Create a new session filled with user data
             let mut session = Session::new();
@@ -446,7 +455,7 @@ enum WanType {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(dead_code)]
-struct SimpleConfig {
+struct NetworkConfig {
     wan_type: u8,
     wan_username: Option<String>,
     wan_password: Option<String>,
@@ -476,8 +485,9 @@ async fn show_easy_setup(
 // Valid user session required. If there is none, redirect to the auth page
 async fn update_easy_setup(
     user: Option<SimpleUser>,
-    Form(cfg): Form<SimpleConfig>,
+    Form(cfg): Form<NetworkConfig>,
     Extension(cache): Extension<redis::Client>,
+    Extension(auth): Extension<Arc<Mutex<SimpleAuth>>>,
 ) -> impl IntoResponse {
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
@@ -506,7 +516,10 @@ async fn update_easy_setup(
                 Some(res) = sub_stream.next() => {
                     //res.get_payload::<String>().unwrap(),
                     match res.get_payload::<String>() {
-                        Ok(_) => "rocket".to_string(),
+                        Ok(_) => {
+                            auth.lock().unwrap().renew();
+                            "rocket".to_string()
+                        },
                         _ => "NG".to_string(),
                     }
                 },
@@ -766,39 +779,58 @@ async fn update_honest_challenge(
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 #[allow(dead_code)]
-struct SimpleClient {
+struct SimpleAuth {
     name: String,
-    password: String,
+    password: Mutex<Option<String>>,
 }
 
-impl SimpleClient {
-    fn new(name: String, password: String) -> Self {
-        SimpleClient { name, password }
-    }
-}
-
-fn simple_client(opt: &mut Opt) -> SimpleClient {
-    let client_username = opt.client_username.clone();
-    let client_username = env::var("CLIENT_ID").unwrap_or(client_username);
-    let password = opt.client_password.take();
-    let password = match password {
-        Some(p) => p,
-        None => {
-            match env::var("CLIENT_SECRET") {
-                Ok(p) => p,
-                Err(_) => {
-                    match shadow::Shadow::from_name(&client_username) {
-                        Some(s) => s.password,
-                        None => String::from(""),
+impl SimpleAuth {
+    fn new(username: Option<String>, password: Option<String>) -> Self {
+        let name = match username {
+            Some(u) => u,
+            None => env::var("CLIENT_ID").unwrap_or("admin".to_string()),
+        };
+        let password = match password {
+            Some(p) => p,
+            None => {
+                match env::var("CLIENT_SECRET") {
+                    Ok(p) => p,
+                    Err(_) => {
+                        match shadow::Shadow::from_name(&name) {
+                            Some(s) => s.password,
+                            None => String::from(""),
+                        }
                     }
                 }
             }
+        };
+        SimpleAuth {
+            name,
+            password: Mutex::new(Some(password)),
         }
-    };
+    }
 
-    SimpleClient::new(client_username, password)
+    fn renew(&mut self) {
+        let password = match shadow::Shadow::from_name(&self.name) {
+            Some(s) => s.password,
+            None => String::from(""),
+        };
+        self.password.lock().unwrap().replace(password);
+    }
+
+    fn get_password(&self) -> Option<String> {
+        match self.password.lock() {
+            Ok(p) => {
+                match &*p {
+                    Some(p) => Some(p.clone()),
+                    None => None,
+                }
+            },
+            Err(_) => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
