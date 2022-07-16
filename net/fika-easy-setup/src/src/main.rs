@@ -24,6 +24,7 @@ use axum::{
     Json, Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
+use axum_macros::debug_handler;
 use chrono::prelude::*;
 use clap::Parser;
 use futures_util::StreamExt as _;
@@ -127,8 +128,15 @@ async fn main() {
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
     //let oauth_client = oauth_client();
-    //let simple_client = simple_client(&mut opt);
-    let simple_auth = SimpleAuth::new(opt.client_username.take(), opt.client_password.take());
+
+    let otp = ServerCtx::new(
+        &opt.api_url,
+        &opt.access_token,
+        &opt.wallet_addr,
+
+        opt.client_username.take(),
+        opt.client_password.take(),
+        );
 
     let app = Router::new()
         .route("/", get(index))
@@ -155,8 +163,9 @@ async fn main() {
         .route(API_PATH_POR_WIFI, get(por_wifi).post(por_wifi))
         .layer(Extension(store))
         .layer(Extension(cache))
-        .layer(Extension(Arc::new(simple_auth)))
-        .layer(Extension(opt.clone()))
+        //.layer(Extension(Arc::new(simple_auth)))
+        .layer(Extension(Arc::new(otp)))
+        //.layer(Extension(opt.clone()))
         .merge(axum_extra::routing::SpaRouter::new(
             "/__res__",
             opt.static_dir,
@@ -411,44 +420,52 @@ where
 }
 
 async fn do_simple_auth(
-    Form(user): Form<SimpleUser>,
-    Extension(auth): Extension<Arc<SimpleAuth>>,
+    Form(login): Form<SimpleUser>,
+    Extension(server): Extension<Arc<ServerCtx>>,
     Extension(store): Extension<MemoryStore>,
 ) -> impl IntoResponse /*Html<&'static str>*/ {
-    dbg!(&user);
+    dbg!(&login);
+    dbg!(&server);
 
     let mut headers = HeaderMap::new();
 
-    let auth_name = auth.name.clone();
-    let auth_password = match auth.get_password() {
-        Some(p) => p,
-        None => String::from(""),
-    };
-
-    if user.name == auth_name {
-        debug!("[debug] compare password = {}", auth_password);
-        let matched = pwhash::unix::verify(&user.password, &auth_password);
-        if matched {
-            // Create a new session filled with user data
-            let mut session = Session::new();
-            session.insert("user", &user).unwrap();
-
-            // Store session and get corresponding cookie
-            let cookie = store.store_session(session).await.unwrap().unwrap();
-
-            // Build the cookie
-            let cookie = format!("{}={}; SameSite=Lax; Path=/", COOKIE_NAME, cookie);
-
-            // Set cookie
-            headers.insert(SET_COOKIE, cookie.parse().unwrap());
-
-            (headers, Redirect::to(API_PATH_SETUP_EASY))
-        } else {
-            (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
+    if let Some(username) = &server.login_name {
+        if username != &login.name {
+            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
         }
-    } else {
-        (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
+    } else if let Ok(username) = env::var("LOGIN_NAME") {
+        if username != login.name {
+            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
+        }
+    } else if let Some(password) = &server.login_password {
+        if password != &login.password {
+            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
+        }
+    } else if let Ok(password) = env::var("LOGIN_PASSWORD") {
+        if password != login.password {
+            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
+        }
+    } else if let Ok(spassword) = server.get_shadow_password(&login.name) {
+        debug!("[debug] compare password = ^{}$", spassword);
+        if spassword.len() != 0 && pwhash::unix::verify(&login.password, &spassword) == false {
+            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
+        }
     }
+
+    // Create a new session filled with user data
+    let mut session = Session::new();
+    session.insert("user", &login).unwrap();
+
+    // Store session and get corresponding cookie
+    let cookie = store.store_session(session).await.unwrap().unwrap();
+
+    // Build the cookie
+    let cookie = format!("{}={}; SameSite=Lax; Path=/", COOKIE_NAME, cookie);
+
+    // Set cookie
+    headers.insert(SET_COOKIE, cookie.parse().unwrap());
+
+    (headers, Redirect::to(API_PATH_SETUP_EASY))
 }
 
 const EASY_SETUP_TEMP: &str = std::include_str!("../templates/easy_setup.html");
@@ -496,7 +513,6 @@ async fn update_easy_setup(
     user: Option<SimpleUser>,
     Form(cfg): Form<NetworkConfig>,
     Extension(cache): Extension<redis::Client>,
-    Extension(auth): Extension<Arc<Mutex<SimpleAuth>>>,
 ) -> impl IntoResponse {
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
@@ -529,7 +545,7 @@ async fn update_easy_setup(
                     //res.get_payload::<String>().unwrap(),
                     match res.get_payload::<String>() {
                         Ok(_) => {
-                            auth.lock().unwrap().renew();
+                            //auth.renew();
                             "rocket".to_string()
                         },
                         _ => "NG".to_string(),
@@ -589,7 +605,7 @@ struct IotPairingCfg {
     expire: Option<DateTime<Utc>>,
 }
 
-mod my_date_format {
+/*mod my_date_format {
     /// ref from https://serde.rs/custom-date-format.html
     use chrono::{DateTime, Local, TimeZone};
     use serde::{self, Deserialize, Deserializer, Serializer};
@@ -611,111 +627,148 @@ mod my_date_format {
             .datetime_from_str(&s, FORMAT)
             .map_err(serde::de::Error::custom)
     }
-}
+}*/
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct KApOtp {
     otp: String,
-    #[serde(with = "my_date_format")]
-    invalid_time: DateTime<Local>,
-    code: u16,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct OtpCode {
-    api_url: String,
-    access_token: String,
-    wallet: String,
-    mac: String,
-
-    otp: String,
+    /*#[serde(with = "my_date_format")]
+    invalid_time: DateTime<Local>,*/
     invalid_time: DateTime<Utc>,
     code: u16,
 }
 
-impl OtpCode {
-    fn new(api_url: &str, access_token: &str, wallet: &str, mac: &str) -> Self {
-        OtpCode {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct InternalServerCtx {
+    otp: String,
+    code: u16,
+    invalid_time: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ServerCtx {
+    api_url: String,
+    access_token: String,
+    wallet: String,
+
+    /* authenticate */
+    login_name: Option<String>,
+    login_password: Option<String>,
+
+    internal: Mutex<InternalServerCtx>,
+}
+
+impl ServerCtx {
+    fn new(api_url: &str, access_token: &str, wallet: &str,
+           login_name: Option<String>, login_password: Option<String>,
+    ) -> Self {
+        ServerCtx {
             api_url: api_url.to_string(),
             access_token: access_token.to_string(),
             wallet: wallet.to_string(),
-            mac: mac.to_string(),
 
-            otp: repeat_with(fastrand::alphanumeric).take(6).collect(),
-            invalid_time: Utc::now(), /* + chrono::Duration::seconds(300)*/
-            code: 404,
+            login_name,
+            login_password,
+
+            internal: Mutex::new(InternalServerCtx {
+                otp: repeat_with(fastrand::alphanumeric).take(6).collect(),
+                invalid_time: Utc::now(), /* + chrono::Duration::seconds(300)*/
+                code: 404,
+            }),
         }
     }
 
-    async fn rest_get(&mut self) -> Result<&str> {
-        let now = Utc::now();
+    async fn rest_get(&self) -> Result<String> {
+        /*let mac = String::from("A1:A2:33:44:55:66");
+        let invalid_time;
+        {
+            let internal = self.internal.lock().unwrap();
+            invalid_time = internal.invalid_time;
+        }*/
 
-        debug!("1111 {:?}", self);
-
-        if now >= self.invalid_time {
+        /*if Utc::now() >= invalid_time */{
+            let url = format!("{}/v0/ap/otp", &self.api_url);
             let client = reqwest::Client::new();
             let data = client
-                .get(format!("{}/v0/ap/otp", &self.api_url))
+                .get(&url)
                 //.bearer_auth(token.access_token().secret())
                 .header("ACCESSTOKEN", &self.access_token)
-                .query(&[("ap_wallet", &self.wallet), ("ap_mac", &self.mac)])
+                .query(&[("ap_wallet", &self.wallet)/*, ("ap_mac", &mac)*/])
                 .send()
                 .await?
                 .json::<KApOtp>()
                 .await?;
 
-            debug!("3333 {:?}", data);
+            debug!("{} get as {:?}", url, data);
 
-            self.otp = data.otp;
-            self.invalid_time = data.invalid_time.into();
-            self.code = data.code;
-        }
+            {
+                let mut internal = self.internal.lock().unwrap();
 
-        Ok(&self.otp)
+                internal.otp = data.otp.clone();
+                internal.invalid_time = data.invalid_time;
+                internal.code = data.code;
+
+                Ok(data.otp)
+            }
+        }/* else {
+            let internal = self.internal.lock().unwrap();
+
+            Ok(internal.otp.clone())
+        }*/
     }
 
-    fn as_app_query(&self) -> Result<KAppOtp> {
+    fn as_app_query(&self, otp: Option<String>) -> Result<KAppOtp> {
+        let otp = match otp {
+            Some(o) => o,
+            None => {
+                let internal = self.internal.lock().unwrap();
+                internal.otp.clone()
+            }
+        };
+
         let url = reqwest::Url::parse_with_params(
             &format!("{}/v0/ap/otp", &self.api_url),
             &[
                 ("ap_wallet", &self.wallet),
-                ("ap_mac", &self.mac),
-                ("otp", &self.otp),
+                ("otp", &otp),
+                //("ap_mac", &self.mac),
             ],
         )?;
 
         Ok(KAppOtp {
-            ap_wallet: &self.wallet,
-            ap_mac: Some(&self.mac),
-            otp: &self.otp,
+            ap_wallet: self.wallet.clone(),
             url: url.into(),
+            otp,
+            //ap_mac: Some(self.mac.clone()),
         })
+    }
+
+    fn get_shadow_password(&self, username: &str) -> Result<String> {
+        match shadow::Shadow::from_name(username) {
+            Some(s) => Ok(s.password),
+            None => Err(anyhow::anyhow!("User {} password not found", username)),
+        }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct KAppOtp<'a> {
-    ap_wallet: &'a str,
-    ap_mac: Option<&'a str>,
-    otp: &'a str,
+struct KAppOtp {
+    ap_wallet: String,
+    otp: String,
     url: String,
+    //ap_mac: Option<String>, //XXX remove MAC
 }
 
+#[debug_handler]
 async fn show_pairing(
     user: Option<SimpleUser>,
-    Extension(opt): Extension<Opt>,
+    Extension(otp): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
     } else {
-        let mut otp = OtpCode::new(
-            &opt.api_url,
-            &opt.access_token,
-            &opt.wallet_addr,
-            &opt.mac_address,
-        );
-        _ = otp.rest_get().await;
-        let app_otp = otp.as_app_query().unwrap();
+        let pincode = otp.rest_get().await.ok();
+        let app_otp = otp.as_app_query(pincode).unwrap();
 
         let cfg = serde_json::to_string(&app_otp).unwrap();
         let code = QrCode::new(cfg.into_bytes()).unwrap();
@@ -736,14 +789,14 @@ async fn show_pairing(
         } else {
             paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, otp.wallet.as_ref().unwrap());
         };*/
-        let paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, &otp.wallet);
+        let paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, &app_otp.ap_wallet);
 
         Html(
             PAIRING_TEMP
                 .replace("{{ content }}", &String::from_utf8_lossy(&image))
                 .replace("{{ getJson }}", &paired)
-                .replace("{{ otp }}", &otp.otp)
-                .replace("{{ routerId }}", &otp.wallet),
+                .replace("{{ otp }}", &app_otp.otp)
+                .replace("{{ routerId }}", &app_otp.ap_wallet),
         )
         .into_response()
     }
@@ -759,7 +812,7 @@ async fn create_pairing(
     user: Option<SimpleUser>,
     Json(input): Json<PairingCfg>,
     Extension(cache): Extension<redis::Client>,
-    Extension(opt): Extension<Opt>,
+    Extension(otp_code): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
@@ -779,7 +832,7 @@ async fn create_pairing(
         }
 
         let iot = IotPairingCfg {
-            wallet: Some(opt.wallet_addr),
+            wallet: Some(otp_code.wallet.clone()),
             expire: None,
             otp: Some(otp),
         };
@@ -895,7 +948,7 @@ async fn update_honest_challenge(
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+/*#[derive(Serialize, Deserialize, Debug)]
 #[allow(dead_code)]
 struct SimpleAuth {
     name: String,
@@ -924,7 +977,7 @@ impl SimpleAuth {
         }
     }
 
-    fn renew(&mut self) {
+    fn renew(&self) {
         let password = match shadow::Shadow::from_name(&self.name) {
             Some(s) => s.password,
             None => String::from(""),
@@ -941,7 +994,7 @@ impl SimpleAuth {
             Err(_) => None,
         }
     }
-}
+}*/
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[allow(dead_code)]
