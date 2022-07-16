@@ -24,6 +24,7 @@ use axum::{
     Json, Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
+use chrono::prelude::*;
 use clap::Parser;
 use futures_util::StreamExt as _;
 use http::header;
@@ -35,15 +36,14 @@ use qrcode::render::svg;
 use qrcode::QrCode;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use std::iter::repeat_with;
 use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
-use tracing::{debug/*, error, info, instrument*/};
+use tracing::debug;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use chrono::prelude::*;
-use std::iter::repeat_with;
-use std::sync::{Arc, Mutex};
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
@@ -86,8 +86,15 @@ struct Opt {
     #[clap(long = "private-key", default_value = "certs/key.pem")]
     private_key: String,
 
-    #[clap(long = "api-url", default_value = "https://fikapark.com/api/v1")]
+    #[clap(long = "api-url", default_value = "https://oss-api.k36588.info")]
     api_url: String,
+    #[clap(
+        long = "access-token",
+        default_value = "ce18d7a0940719a00da82448b38c90b2"
+    )]
+    access_token: String,
+    #[clap(long = "mac-address", default_value = "A1:A2:33:44:55:66")]
+    mac_address: String,
 }
 
 static COOKIE_NAME: &str = "SESSION";
@@ -471,7 +478,9 @@ async fn show_easy_setup(
     if user.is_none() {
         Html(std::include_str!("../templates/login.html")).into_response()
     } else {
-        let mut cfg = String::from(r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#);
+        let mut cfg = String::from(
+            r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#,
+        );
         if let Ok(mut conn) = cache.get_async_connection().await {
             cfg = conn
                 .get::<&str, String>("kdaemon.easy.setup")
@@ -496,7 +505,10 @@ async fn update_easy_setup(
 
         let msg = match serde_json::to_string(&cfg) {
             Ok(c) => c,
-            Err(e) => { dbg!(&e); "{}".into() },
+            Err(e) => {
+                dbg!(&e);
+                "{}".into()
+            }
         };
 
         if let Ok(mut conn) = cache.get_async_connection().await {
@@ -577,14 +589,116 @@ struct IotPairingCfg {
     expire: Option<DateTime<Utc>>,
 }
 
-async fn rest_get_otp(api_url: &str, wallet: &str) -> Result<IotPairingCfg> {
-    let client = reqwest::Client::new();
-    let data: IotPairingCfg = client
-        .get(format!("{}/otp/{}", api_url, wallet))
-        //.bearer_auth(token.access_token().secret())
-        .send().await?
-        .json::<IotPairingCfg>().await?;
-    Ok(data)
+mod my_date_format {
+    /// ref from https://serde.rs/custom-date-format.html
+    use chrono::{DateTime, Local, TimeZone};
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    const FORMAT: &'static str = "%Y-%m-%d %H:%M:%S";
+    pub fn serialize<S>(date: &DateTime<Local>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = format!("{}", date.format(FORMAT));
+        serializer.serialize_str(&s)
+    }
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Local>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Local
+            .datetime_from_str(&s, FORMAT)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct KApOtp {
+    otp: String,
+    #[serde(with = "my_date_format")]
+    invalid_time: DateTime<Local>,
+    code: u16,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct OtpCode {
+    api_url: String,
+    access_token: String,
+    wallet: String,
+    mac: String,
+
+    otp: String,
+    invalid_time: DateTime<Utc>,
+    code: u16,
+}
+
+impl OtpCode {
+    fn new(api_url: &str, access_token: &str, wallet: &str, mac: &str) -> Self {
+        OtpCode {
+            api_url: api_url.to_string(),
+            access_token: access_token.to_string(),
+            wallet: wallet.to_string(),
+            mac: mac.to_string(),
+
+            otp: repeat_with(fastrand::alphanumeric).take(6).collect(),
+            invalid_time: Utc::now(), /* + chrono::Duration::seconds(300)*/
+            code: 404,
+        }
+    }
+
+    async fn rest_get(&mut self) -> Result<&str> {
+        let now = Utc::now();
+
+        debug!("1111 {:?}", self);
+
+        if now >= self.invalid_time {
+            let client = reqwest::Client::new();
+            let data = client
+                .get(format!("{}/v0/ap/otp", &self.api_url))
+                //.bearer_auth(token.access_token().secret())
+                .header("ACCESSTOKEN", &self.access_token)
+                .query(&[("ap_wallet", &self.wallet), ("ap_mac", &self.mac)])
+                .send()
+                .await?
+                .json::<KApOtp>()
+                .await?;
+
+            debug!("3333 {:?}", data);
+
+            self.otp = data.otp;
+            self.invalid_time = data.invalid_time.into();
+            self.code = data.code;
+        }
+
+        Ok(&self.otp)
+    }
+
+    fn as_app_query(&self) -> Result<KAppOtp> {
+        let url = reqwest::Url::parse_with_params(
+            &format!("{}/v0/ap/otp", &self.api_url),
+            &[
+                ("ap_wallet", &self.wallet),
+                ("ap_mac", &self.mac),
+                ("otp", &self.otp),
+            ],
+        )?;
+
+        Ok(KAppOtp {
+            ap_wallet: &self.wallet,
+            ap_mac: Some(&self.mac),
+            otp: &self.otp,
+            url: url.into(),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct KAppOtp<'a> {
+    ap_wallet: &'a str,
+    ap_mac: Option<&'a str>,
+    otp: &'a str,
+    url: String,
 }
 
 async fn show_pairing(
@@ -594,15 +708,16 @@ async fn show_pairing(
     if user.is_none() {
         Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
     } else {
-        let otp = rest_get_otp(&opt.api_url, &opt.wallet_addr).await
-            .unwrap_or_else(|_|
-                    IotPairingCfg {
-                    wallet: Some(opt.wallet_addr.clone()),
-                    otp: Some(repeat_with(fastrand::alphanumeric).take(6).collect()),
-                    expire: Some(Utc::now() + chrono::Duration::seconds(300)),
-            });
+        let mut otp = OtpCode::new(
+            &opt.api_url,
+            &opt.access_token,
+            &opt.wallet_addr,
+            &opt.mac_address,
+        );
+        _ = otp.rest_get().await;
+        let app_otp = otp.as_app_query().unwrap();
 
-        let cfg = serde_json::to_string(&otp).unwrap();
+        let cfg = serde_json::to_string(&app_otp).unwrap();
         let code = QrCode::new(cfg.into_bytes()).unwrap();
         let mut image = code
             .render()
@@ -615,19 +730,20 @@ async fn show_pairing(
             .into_bytes();
         image.push(b'\n');
 
-        let paired: String;
-        if otp.wallet != Some(opt.wallet_addr) {
+        /* TODO implement check paired flow */
+        /*let paired = if otp.wallet != Some(opt.wallet_addr) {
             paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, otp.wallet.as_ref().unwrap());
         } else {
             paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, otp.wallet.as_ref().unwrap());
-        }
+        };*/
+        let paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, &otp.wallet);
 
         Html(
             PAIRING_TEMP
                 .replace("{{ content }}", &String::from_utf8_lossy(&image))
                 .replace("{{ getJson }}", &paired)
-                .replace("{{ otp }}", &otp.otp.unwrap())
-                .replace("{{ routerId }}", &otp.wallet.unwrap())
+                .replace("{{ otp }}", &otp.otp)
+                .replace("{{ routerId }}", &otp.wallet),
         )
         .into_response()
     }
@@ -794,17 +910,13 @@ impl SimpleAuth {
         };
         let password = match password {
             Some(p) => p,
-            None => {
-                match env::var("CLIENT_SECRET") {
-                    Ok(p) => p,
-                    Err(_) => {
-                        match shadow::Shadow::from_name(&name) {
-                            Some(s) => s.password,
-                            None => String::from(""),
-                        }
-                    }
-                }
-            }
+            None => match env::var("CLIENT_SECRET") {
+                Ok(p) => p,
+                Err(_) => match shadow::Shadow::from_name(&name) {
+                    Some(s) => s.password,
+                    None => String::from(""),
+                },
+            },
         };
         SimpleAuth {
             name,
@@ -822,11 +934,9 @@ impl SimpleAuth {
 
     fn get_password(&self) -> Option<String> {
         match self.password.lock() {
-            Ok(p) => {
-                match &*p {
-                    Some(p) => Some(p.clone()),
-                    None => None,
-                }
+            Ok(p) => match &*p {
+                Some(p) => Some(p.clone()),
+                None => None,
             },
             Err(_) => None,
         }
@@ -946,9 +1056,7 @@ async fn por_wifi(
                 dbg!(&msg);
             }
 
-            get_result_emoji("PoR service", &resp)
-                .await
-                .into_response()
+            get_result_emoji("PoR service", &resp).await.into_response()
         } else {
             let mut cfg = String::from(r#"{"state":true}"#);
             if let Ok(mut conn) = cache.get_async_connection().await {
