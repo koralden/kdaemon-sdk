@@ -15,7 +15,7 @@ use axum::{
     extract::Form,
     extract::{
         rejection::TypedHeaderRejectionReason, Extension, FromRequest, Query, RequestParts,
-        TypedHeader,
+        TypedHeader, ConnectInfo, Path,
     },
     http::{header::SET_COOKIE, HeaderMap, StatusCode},
     response::Html,
@@ -29,10 +29,6 @@ use chrono::prelude::*;
 use clap::Parser;
 use futures_util::StreamExt as _;
 use http::header;
-use oauth2::{
-    basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
-    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
-};
 use qrcode::render::svg;
 use qrcode::QrCode;
 use redis::AsyncCommands;
@@ -43,7 +39,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
-use tracing::debug;
+use tracing::{debug, info/*, error*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug, Clone)]
@@ -53,12 +49,19 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 )]
 struct Opt {
     /// set the listen addr
-    #[clap(short = 'a', long = "addr", default_value = "::1")]
-    addr: String,
+    #[clap(short = 'a', long = "private-addr", default_value = "::1")]
+    private_addr: String,
 
     /// set the listen port
-    #[clap(short = 'p', long = "port", default_value = "8888")]
-    port: u16,
+    #[clap(short = 'p', long = "private-port", default_value = "8888")]
+    private_port: u16,
+
+    #[clap(long = "public-addr", default_value = "::1")]
+    public_addr: String,
+
+    /// set the listen port
+    #[clap(long = "public-port", default_value = "8889")]
+    public_port: u16,
 
     #[clap(long = "log-level", default_value = "info")]
     log_level: String,
@@ -103,15 +106,16 @@ static COOKIE_NAME: &str = "SESSION";
 static API_PATH_SETUP_EASY: &str = "/setup/easy";
 static API_PATH_AUTH_SIMPLE: &str = "/auth/simple";
 static API_PATH_PAIRING: &str = "/pairing";
-static API_PATH_HONEST_CHALLENGE: &str = "/honest/challenge";
 static API_PATH_SHOW_EMOJI: &str = "/show/emoji";
 static API_PATH_LOGOUT: &str = "/logout";
 static API_PATH_SYSTEM_CHECKING: &str = "/system/checking";
 static API_PATH_POR_WIFI: &str = "/por/wifi";
+static API_PATH_HONEST_CHALLENGE: &str = "/honest/challenge/:id";
+static API_PATH_OPENNDS_FAS: &str = "/opennds/fas";
 
 #[tokio::main]
 async fn main() {
-    let mut opt = Opt::parse();
+    let opt = Opt::parse();
     let log_level = &opt.log_level;
 
     tracing_subscriber::registry()
@@ -122,12 +126,21 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let http = tokio::spawn(public_service(
+            opt.public_addr.clone(), opt.public_port,
+            opt.redis_addr.clone(),
+            opt.certificate.clone(), opt.private_key.clone()));
+    let https = tokio::spawn(private_service(opt));
+
+    let _ = tokio::join!(https, http);
+}
+
+async fn private_service(mut opt: Opt) {
     // `MemoryStore` is just used as an example. Don't use this in production.
     let store = MemoryStore::new();
 
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
-    //let oauth_client = oauth_client();
 
     let otp = ServerCtx::new(
         &opt.api_url,
@@ -140,10 +153,6 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(index))
-        //.route("/auth/discord", get(discord_auth))
-        //.route("/auth/authorized", get(login_authorized))
-        //.route("/protected", get(protected))
-        /*.layer(Extension(oauth_client))*/
         .route(
             API_PATH_AUTH_SIMPLE,
             get(show_simple_auth).post(do_simple_auth),
@@ -151,31 +160,25 @@ async fn main() {
         .route(API_PATH_PAIRING, get(show_pairing).post(create_pairing))
         .route(
             API_PATH_SETUP_EASY,
-            get(show_easy_setup).post(update_easy_setup),
+            get(show_network_setup).post(update_network_setup),
         )
         .route(API_PATH_SHOW_EMOJI, get(show_emoji))
-        .route(
-            API_PATH_HONEST_CHALLENGE,
-            get(honest_challenge).post(update_honest_challenge),
-        )
         .route(API_PATH_LOGOUT, get(logout))
         .route(API_PATH_SYSTEM_CHECKING, get(system_checking))
         .route(API_PATH_POR_WIFI, get(por_wifi).post(por_wifi))
         .layer(Extension(store))
         .layer(Extension(cache))
-        //.layer(Extension(Arc::new(simple_auth)))
         .layer(Extension(Arc::new(otp)))
-        //.layer(Extension(opt.clone()))
-        .merge(axum_extra::routing::SpaRouter::new(
+        /*.merge(axum_extra::routing::SpaRouter::new(
             "/__res__",
             opt.static_dir,
-        ));
+        ))*/;
 
     let addr = SocketAddr::from((
-        IpAddr::from_str(opt.addr.as_str()).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)),
-        opt.port,
+            IpAddr::from_str(opt.private_addr.as_str()).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)), 
+        opt.private_port,
     ));
-    tracing::info!("listening on {}", addr);
+    tracing::info!("listening on {} for private", addr);
 
     let config = RustlsConfig::from_pem_file(&opt.certificate, &opt.private_key)
         .await
@@ -187,72 +190,39 @@ async fn main() {
         .unwrap();
 }
 
-fn _oauth_client() -> BasicClient {
-    // Environment variables (* = required):
-    // *"CLIENT_ID"     "REPLACE_ME";
-    // *"CLIENT_SECRET" "REPLACE_ME";
-    //  "REDIRECT_URL"  "http://127.0.0.1:3000/auth/authorized";
-    //  "AUTH_URL"      "https://discord.com/api/oauth2/authorize?response_type=code";
-    //  "TOKEN_URL"     "https://discord.com/api/oauth2/token";
+async fn public_service(public_addr: String, public_port: u16,
+    redis_addr: String,
+    cert: String, private_key: String,
+) {
+    let redis_addr = format!("redis://{}/", redis_addr);
+    let cache = redis::Client::open(redis_addr).unwrap();
 
-    let client_id = env::var("CLIENT_ID").expect("Missing CLIENT_ID!");
-    let client_secret = env::var("CLIENT_SECRET").expect("Missing CLIENT_SECRET!");
-    let redirect_url = env::var("REDIRECT_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:3000/auth/authorized".to_string());
+    let app = Router::new()
+        .route(
+            API_PATH_HONEST_CHALLENGE,
+            get(honest_challenge).post(update_honest_challenge),
+        )
+        .route(
+            API_PATH_OPENNDS_FAS,
+            get(public_opennds_fas),
+        )
+        .layer(Extension(cache))
+        .into_make_service_with_connect_info::<SocketAddr>();
+        
+    let addr = SocketAddr::from((
+            IpAddr::from_str(&public_addr).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)), 
+            public_port,
+    ));
+    tracing::info!("listening on {} for public", addr);
 
-    let auth_url = env::var("AUTH_URL").unwrap_or_else(|_| {
-        "https://discord.com/api/oauth2/authorize?response_type=code".to_string()
-    });
+    let config = RustlsConfig::from_pem_file(cert, private_key)
+        .await
+        .unwrap();
 
-    let token_url = env::var("TOKEN_URL")
-        .unwrap_or_else(|_| "https://discord.com/api/oauth2/token".to_string());
-
-    BasicClient::new(
-        ClientId::new(client_id),
-        Some(ClientSecret::new(client_secret)),
-        AuthUrl::new(auth_url).unwrap(),
-        Some(TokenUrl::new(token_url).unwrap()),
-    )
-    .set_redirect_uri(RedirectUrl::new(redirect_url).unwrap())
-}
-
-// The user data we'll get back from Discord.
-// https://discord.com/developers/docs/resources/user#user-object-user-structure
-#[derive(Debug, Serialize, Deserialize)]
-struct DiscordUser {
-    id: String,
-    avatar: Option<String>,
-    username: String,
-    discriminator: String,
-}
-
-// Session is optional
-async fn _index(user: Option<DiscordUser>) -> impl IntoResponse {
-    match user {
-        Some(u) => format!(
-            "Hey {}! You're logged in!\nYou may now access `/protected`.\nLog out with `/logout`.",
-            u.username
-        ),
-        None => "You're not logged in.\nVisit `/auth/discord` to do so.".to_string(),
-    }
-}
-
-async fn _discord_auth(Extension(client): Extension<BasicClient>) -> impl IntoResponse {
-    let (auth_url, _csrf_token) = client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("identify".to_string()))
-        .url();
-
-    // Redirect to Discord's oauth service
-    Redirect::to(&auth_url.to_string())
-}
-
-// Valid user session required. If there is none, redirect to the auth page
-async fn _protected(user: DiscordUser) -> impl IntoResponse {
-    format!(
-        "Welcome to the protected area :)\nHere's your info:\n{:?}",
-        user
-    )
+    axum_server::bind_rustls(addr, config)
+        .serve(app)
+        .await
+        .unwrap();
 }
 
 async fn logout(
@@ -269,99 +239,6 @@ async fn logout(
     store.destroy_session(session).await.unwrap();
 
     Redirect::to("/")
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct AuthRequest {
-    code: String,
-    state: String,
-}
-
-async fn _login_authorized(
-    Query(query): Query<AuthRequest>,
-    Extension(store): Extension<MemoryStore>,
-    Extension(oauth_client): Extension<BasicClient>,
-) -> impl IntoResponse {
-    // Get an auth token
-    let token = oauth_client
-        .exchange_code(AuthorizationCode::new(query.code.clone()))
-        .request_async(async_http_client)
-        .await
-        .unwrap();
-
-    // Fetch user data from discord
-    let client = reqwest::Client::new();
-    let user_data: DiscordUser = client
-        // https://discord.com/developers/docs/resources/user#get-current-user
-        .get("https://discordapp.com/api/users/@me")
-        .bearer_auth(token.access_token().secret())
-        .send()
-        .await
-        .unwrap()
-        .json::<DiscordUser>()
-        .await
-        .unwrap();
-
-    // Create a new session filled with user data
-    let mut session = Session::new();
-    session.insert("user", &user_data).unwrap();
-
-    // Store session and get corresponding cookie
-    let cookie = store.store_session(session).await.unwrap().unwrap();
-
-    // Build the cookie
-    let cookie = format!("{}={}; SameSite=Lax; Path=/", COOKIE_NAME, cookie);
-
-    // Set cookie
-    let mut headers = HeaderMap::new();
-    headers.insert(SET_COOKIE, cookie.parse().unwrap());
-
-    (headers, Redirect::to("/"))
-}
-
-struct AuthRedirect;
-
-impl IntoResponse for AuthRedirect {
-    fn into_response(self) -> Response {
-        Redirect::temporary("/auth/discord").into_response()
-    }
-}
-
-#[async_trait]
-impl<B> FromRequest<B> for DiscordUser
-where
-    B: Send,
-{
-    // If anything goes wrong or no session is found, redirect to the auth page
-    type Rejection = AuthRedirect;
-
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
-        let Extension(store) = Extension::<MemoryStore>::from_request(req)
-            .await
-            .expect("`MemoryStore` extension is missing");
-
-        let cookies = TypedHeader::<headers::Cookie>::from_request(req)
-            .await
-            .map_err(|e| match *e.name() {
-                header::COOKIE => match e.reason() {
-                    TypedHeaderRejectionReason::Missing => AuthRedirect,
-                    _ => panic!("unexpected error getting Cookie header(s): {}", e),
-                },
-                _ => panic!("unexpected error getting cookies: {}", e),
-            })?;
-        let session_cookie = cookies.get(COOKIE_NAME).ok_or(AuthRedirect)?;
-
-        let session = store
-            .load_session(session_cookie.to_string())
-            .await
-            .unwrap()
-            .ok_or(AuthRedirect)?;
-
-        let user = session.get::<DiscordUser>("user").ok_or(AuthRedirect)?;
-
-        Ok(user)
-    }
 }
 
 // Session is optional
@@ -488,7 +365,15 @@ struct NetworkConfig {
     password_overwrite: Option<String>,
 }
 
-async fn show_easy_setup(
+struct AuthRedirect;
+
+impl IntoResponse for AuthRedirect {
+    fn into_response(self) -> Response {
+        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
+    }
+}
+
+async fn show_network_setup(
     user: Option<SimpleUser>,
     Extension(cache): Extension<redis::Client>,
 ) -> impl IntoResponse {
@@ -509,7 +394,7 @@ async fn show_easy_setup(
 }
 
 // Valid user session required. If there is none, redirect to the auth page
-async fn update_easy_setup(
+async fn update_network_setup(
     user: Option<SimpleUser>,
     Form(cfg): Form<NetworkConfig>,
     Extension(cache): Extension<redis::Client>,
@@ -872,44 +757,72 @@ async fn create_pairing(
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 enum Command {
-    Init,
+    New,
     Hashed,
     Completed,
+    Expired,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct HonestChallenge {
-    command: Option<Command>,
-    token: String,
+    command: Command,
+    token: Option<String>,
     hashed: Option<String>,
 }
 
-async fn honest_challenge(Extension(cache): Extension<redis::Client>) -> impl IntoResponse {
-    let mut conn = cache.get_async_connection().await.unwrap();
-    let token: String = conn
-        .get("honest:challenge:token")
-        .await
-        .unwrap_or("TODO: get from redis/subscribe".to_string());
+async fn honest_challenge(
+    Path(challenger_id): Path<String>,
+    Extension(cache): Extension<redis::Client>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    info!("client ip-address {}", addr);
 
-    let challenge = HonestChallenge {
-        command: Some(Command::Init),
-        token,
-        hashed: None,
-    };
-    (StatusCode::OK, Json(challenge))
+
+    let mut conn = cache.get_async_connection().await.unwrap();
+
+    if let Ok(hashed) = conn.get::<String, String>(format!("honest:challenger:{}", challenger_id)).await {
+        info!("redis get honest:challenger {:?} have handled", &challenger_id);
+        let challenge = HonestChallenge {
+            command: Command::Completed,
+            token: None,
+            hashed: Some(hashed),
+        };
+        (StatusCode::NOT_ACCEPTABLE, Json(challenge))
+    } else {
+        if let Ok(token) = conn.get("honest:challenge:token").await {
+            debug!("redis get honest:challenge:token ^{}$ success", token);
+            let challenge = HonestChallenge {
+                command: Command::New,
+                token: Some(token),
+                hashed: None,
+            };
+            (StatusCode::OK, Json(challenge))
+        } else {
+            debug!("redis get honest:challenge:token fail");
+            let challenge = HonestChallenge {
+                command: Command::Expired,
+                token: None,
+                hashed: None,
+            };
+            (StatusCode::NOT_FOUND, Json(challenge))
+        }
+    }
 }
 
-async fn post_honest_challenge(
-    challenge: &mut HonestChallenge,
+async fn post_honest_challenge<'a>(
+    challenger_id: &'a str,
+    hashed: &'a str,
     mut conn: redis::aio::Connection,
-) -> Result<HonestChallenge> {
-    let hashed = challenge.hashed.take().unwrap_or("nonexist".to_string());
+) -> Result<bool> {
+    let expired = 60 * 60 * 12; /* 12 hr */
+    let key = format!("honest:challenger:{}", challenger_id);
     let _ = conn
-        .set::<&str, &str, usize>("honest:challenge:hashed", &hashed)
+        .set_ex::<&str, &str, _>(&key, hashed, expired)
         .await?;
     let _ = conn
-        .publish::<&str, &str, usize>("honest:challenge:hashed", &hashed)
+        .publish::<&str, &str, _>(&key, hashed)
         .await?;
+    Ok(true)
 
     /*let pubsub_conn = conn.into_pubsub();
     pubsub_conn.publish("honest:challenge:hashed", &hashed).await?;*/
@@ -923,20 +836,25 @@ async fn post_honest_challenge(
     conn.set::<&str, &str, usize>("honest:challenge:token", "test").await;*/
 
     /* send to backend and tried to get response */
-    let mut response = challenge.clone();
-    response.command = Some(Command::Completed);
-
-    Ok(response)
+    /*let mut response = challenge.clone();
+    response.command = Command::Completed;
+    Ok(response)*/
 }
 
 async fn update_honest_challenge(
+    Path(challenger_id): Path<String>,
     Json(mut challenge): Json<HonestChallenge>,
     Extension(cache): Extension<redis::Client>,
 ) -> impl IntoResponse {
-    if let Some(ref _hashed) = challenge.hashed {
+    if let Some(ref hashed) = challenge.hashed {
         if let Ok(conn) = cache.get_async_connection().await {
-            if let Ok(resp) = post_honest_challenge(&mut challenge, conn).await {
-                (StatusCode::OK, Json(resp))
+            let ret = post_honest_challenge(&challenger_id, hashed, conn).await;
+
+            dbg!(&ret);
+
+            if ret.is_ok() {
+                challenge.command = Command::Completed;
+                (StatusCode::OK, Json(challenge))
             } else {
                 (StatusCode::NOT_FOUND, Json(challenge))
             }
@@ -1122,3 +1040,15 @@ async fn por_wifi(
         }
     }
 }
+
+const FAS_TEMP: &str = std::include_str!("../templates/opennds_fas.html");
+async fn public_opennds_fas(
+    req: Option<Query<String>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+    dbg!(req);
+    dbg!(addr);
+
+    Html(FAS_TEMP).into_response()
+}
+
