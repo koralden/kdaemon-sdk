@@ -9,7 +9,7 @@ STOP=10
 
 start() {
 	#. /lib/functions/network.sh
-	#network_get_ipaddrs myLanIp guest
+	#network_get_ipaddrs myLanIp kguest
 	printf "Starting fika-opennds: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \

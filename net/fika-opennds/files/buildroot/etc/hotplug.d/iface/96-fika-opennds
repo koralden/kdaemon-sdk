@@ -3,7 +3,7 @@
 . /lib/functions.sh
 
 /etc/init.d/fika-opennds enabled && [ "$ACTION" = "ifup" ] && {
-    if [ ${INTERFACE} = 'guest' ]; then
+    if [ ${INTERFACE} = 'kguest' ]; then
         /etc/init.d/fika-opennds restart
     fi
 }
