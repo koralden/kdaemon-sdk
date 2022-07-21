@@ -8,6 +8,8 @@ START=97
 STOP=10
 
 start() {
+	printf "Starting fika-manager-recovery: "
+        /usr/bin/fika-manager-recovery -l info -c /etc/fika_manager/factory.toml
 	printf "Starting fika-manager: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \

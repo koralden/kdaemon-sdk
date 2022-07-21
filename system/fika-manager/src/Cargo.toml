@@ -5,8 +5,17 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "fika-manager"
+path = "src/main.rs"
+
+[[bin]]
+name = "fika-manager-recovery"
+path = "src/recovery.rs"
+
 [dependencies]
 anyhow = "1.0.58"
+async-trait = "0.1.56"
 bytes = "1.1.0"
 clap = { version = "3.2.5", features = ["derive"] }
 fastrand = "1.7.0"
