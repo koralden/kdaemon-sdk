@@ -8,7 +8,7 @@ pub struct BossMenu {
     root_url: String,
     access_token: String,
 
-    otp_url: String,
-    ap_token_url: String,
-    hcs_pair_url: String,
+    otp_path: String,
+    ap_token_path: String,
+    hcs_path: String,
 }

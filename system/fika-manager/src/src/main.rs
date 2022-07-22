@@ -1,5 +1,5 @@
-use clap::Parser;
 use anyhow::{anyhow, Result};
+use clap::Parser;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -231,11 +231,7 @@ async fn publish_message(
 }
 
 #[instrument(skip(chan_tx))]
-async fn set_message(
-    chan_tx: mpsc::Sender<Command>,
-    topic: String,
-    payload: String,
-) -> Result<()> {
+async fn set_message(chan_tx: mpsc::Sender<Command>, topic: String, payload: String) -> Result<()> {
     let (resp_tx, resp_rx) = oneshot::channel();
 
     chan_tx
@@ -337,12 +333,23 @@ fn spawn_task_run_path_publish(
     skip(chan_tx, shared),
 )]
 async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) -> Result<()> {
-    let mut entries: HashMap<String, (PathBuf, Option<Duration>, Option<Duration>, Option<bool>, Option<bool>)> =
-        HashMap::new();
+    let mut entries: HashMap<
+        String,
+        (
+            PathBuf,
+            Option<Duration>,
+            Option<Duration>,
+            Option<bool>,
+            Option<bool>,
+        ),
+    > = HashMap::new();
     if let Ok(state) = shared.lock() {
         if let Some(ps) = &state.cfg.task {
             for p in ps {
-                entries.insert(p.topic.clone(), (p.path.clone(), p.start_at, p.period, p.db_publish, p.db_set));
+                entries.insert(
+                    p.topic.clone(),
+                    (p.path.clone(), p.start_at, p.period, p.db_publish, p.db_set),
+                );
             }
         }
     }
@@ -386,7 +393,9 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                         topic.to_string(),
                         path.to_path_buf(),
                         timeout,
-                        *db_publish, *db_set);
+                        *db_publish,
+                        *db_set,
+                    );
                 }
             }
         }

@@ -92,11 +92,10 @@ struct Opt {
 
     #[clap(long = "api-url", default_value = "https://oss-api.k36588.info")]
     api_url: String,
-    #[clap(
-        long = "access-token",
-        default_value = "ce18d7a0940719a00da82448b38c90b2"
-    )]
+    #[clap(long = "access-token", default_value = "ce18d7a0940719a00da82448b38c90b2")]
     access_token: String,
+    #[clap(long = "otp-path", default_value = "v0/ap/otp")]
+    otp_path: String,
     #[clap(long = "mac-address", default_value = "A1:A2:33:44:55:66")]
     mac_address: String,
 }
@@ -145,6 +144,7 @@ async fn private_service(mut opt: Opt) {
     let otp = ServerCtx::new(
         &opt.api_url,
         &opt.access_token,
+        &opt.otp_path,
         &opt.wallet_addr,
 
         opt.client_username.take(),
@@ -534,6 +534,7 @@ struct InternalServerCtx {
 struct ServerCtx {
     api_url: String,
     access_token: String,
+    otp_path: String,
     wallet: String,
 
     /* authenticate */
@@ -544,12 +545,14 @@ struct ServerCtx {
 }
 
 impl ServerCtx {
-    fn new(api_url: &str, access_token: &str, wallet: &str,
+    fn new(api_url: &str, access_token: &str, otp_path: &str,
+           wallet: &str,
            login_name: Option<String>, login_password: Option<String>,
     ) -> Self {
         ServerCtx {
             api_url: api_url.to_string(),
             access_token: access_token.to_string(),
+            otp_path: otp_path.to_string(),
             wallet: wallet.to_string(),
 
             login_name,
@@ -572,7 +575,7 @@ impl ServerCtx {
         }*/
 
         /*if Utc::now() >= invalid_time */{
-            let url = format!("{}/v0/ap/otp", &self.api_url);
+            let url = format!("{}/{}", &self.api_url, &self.otp_path);
             let client = reqwest::Client::new();
             let data = client
                 .get(&url)
@@ -612,7 +615,7 @@ impl ServerCtx {
         };
 
         let url = reqwest::Url::parse_with_params(
-            &format!("{}/v0/ap/otp", &self.api_url),
+            &format!("{}/{}", &self.api_url, &self.otp_path),
             &[
                 ("ap_wallet", &self.wallet),
                 ("otp", &otp),
@@ -756,56 +759,54 @@ async fn create_pairing(
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-enum Command {
-    New,
-    Hashed,
-    Completed,
-    Expired,
+struct HonestChallenge {
+    ap_wallet: Option<String>,
+    token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct HonestChallenge {
-    command: Command,
-    token: Option<String>,
-    hashed: Option<String>,
+struct BossHcsPair {
+    hsc_token: String,
+    init_time: DateTime<Utc>,
+    invalid_time: DateTime<Utc>,
+    code: u16,
 }
 
 async fn honest_challenge(
     Path(challenger_id): Path<String>,
     Extension(cache): Extension<redis::Client>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     info!("client ip-address {}", addr);
 
+    let mut challenge = HonestChallenge {
+        ap_wallet: None,
+        token: None,
+    };
 
     let mut conn = cache.get_async_connection().await.unwrap();
 
-    if let Ok(hashed) = conn.get::<String, String>(format!("honest:challenger:{}", challenger_id)).await {
-        info!("redis get honest:challenger {:?} have handled", &challenger_id);
-        let challenge = HonestChallenge {
-            command: Command::Completed,
-            token: None,
-            hashed: Some(hashed),
-        };
+    if let Ok(hashed) = conn.get::<String, String>(format!("honest.challenger.{}", challenger_id)).await {
+        info!("redis get honest.challenger {:?} have handled", &challenger_id);
+        challenge.token = Some(hashed);
         (StatusCode::NOT_ACCEPTABLE, Json(challenge))
     } else {
-        if let Ok(token) = conn.get("honest:challenge:token").await {
-            debug!("redis get honest:challenge:token ^{}$ success", token);
-            let challenge = HonestChallenge {
-                command: Command::New,
-                token: Some(token),
-                hashed: None,
-            };
-            (StatusCode::OK, Json(challenge))
-        } else {
-            debug!("redis get honest:challenge:token fail");
-            let challenge = HonestChallenge {
-                command: Command::Expired,
-                token: None,
-                hashed: None,
-            };
-            (StatusCode::NOT_FOUND, Json(challenge))
+        if let Ok(token) = conn.get::<&str, String>("boss.hcs.token").await {
+            debug!("redis get boss.hcs.token ^{}$ success", token);
+            if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
+                let now = Utc::now();
+
+                if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
+                    challenge.token = Some(boss_hcs.hsc_token);
+                    challenge.ap_wallet = Some(server_ctx.wallet.clone());
+                    return (StatusCode::OK, Json(challenge));
+                }
+            }
         }
+
+        debug!("redis get boss.hcs.token fail");
+        (StatusCode::NOT_FOUND, Json(challenge))
     }
 }
 
@@ -815,45 +816,45 @@ async fn post_honest_challenge<'a>(
     mut conn: redis::aio::Connection,
 ) -> Result<bool> {
     let expired = 60 * 60 * 12; /* 12 hr */
-    let key = format!("honest:challenger:{}", challenger_id);
+    let key = format!("honest.challenger.{}", challenger_id);
     let _ = conn
         .set_ex::<&str, &str, _>(&key, hashed, expired)
         .await?;
+
+    let report = "honest.challenger.report";
     let _ = conn
-        .publish::<&str, &str, _>(&key, hashed)
+        .lpush::<&str, &str, _>(report, challenger_id)
+        .await?;
+
+    let notify = "honest.challenger";
+    let _ = conn
+        .publish::<&str, &str, _>(notify, challenger_id)
         .await?;
     Ok(true)
-
-    /*let pubsub_conn = conn.into_pubsub();
-    pubsub_conn.publish("honest:challenge:hashed", &hashed).await?;*/
-
-    /*redis::cmd("SET")
-    .arg(&["key2", "bar"])
-    .query_async(&mut conn)
-    .await.unwrap();*/
-    /*let cache = redis::Client::open("redis://127.0.0.1/").unwrap();
-    let mut conn = cache.get_async_connection().await.unwrap();
-    conn.set::<&str, &str, usize>("honest:challenge:token", "test").await;*/
-
-    /* send to backend and tried to get response */
-    /*let mut response = challenge.clone();
-    response.command = Command::Completed;
-    Ok(response)*/
 }
 
 async fn update_honest_challenge(
     Path(challenger_id): Path<String>,
-    Json(mut challenge): Json<HonestChallenge>,
+    Json(challenge): Json<HonestChallenge>,
     Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if let Some(ref hashed) = challenge.hashed {
+    if challenge.ap_wallet.is_none() {
+        return (StatusCode::NOT_FOUND, Json(challenge));
+    }
+    if let Some(ref ap_wallet) = challenge.ap_wallet {
+        if ap_wallet != &server_ctx.wallet {
+            return (StatusCode::NOT_FOUND, Json(challenge));
+        }
+    }
+
+    if let Some(ref hashed) = challenge.token {
         if let Ok(conn) = cache.get_async_connection().await {
             let ret = post_honest_challenge(&challenger_id, hashed, conn).await;
 
             dbg!(&ret);
 
             if ret.is_ok() {
-                challenge.command = Command::Completed;
                 (StatusCode::OK, Json(challenge))
             } else {
                 (StatusCode::NOT_FOUND, Json(challenge))

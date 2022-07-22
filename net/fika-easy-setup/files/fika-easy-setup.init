@@ -15,9 +15,11 @@ start() {
 	start-stop-daemon -S -q -c root:root -b \
 		-x /usr/bin/fika-easy-setup -- \
                 -a $myLanIp -w 0x365962cd383a593975E743fD59Bbf2C1Bc141CF5 \
+                --api-url https://oss-api.k36588.info \
+                --access-token ce18d7a0940719a00da82448b38c90b2 \
+                --otp-path v0/ap/otp \
                 --certificate /etc/fika_easy_setup/certs/cert.pem \
-                --private-key /etc/fika_easy_setup/certs/key.pem \
-                --static-dir /etc/fika_easy_setup/templates
+                --private-key /etc/fika_easy_setup/certs/key.pem
 
 	[ $? = 0 ] && echo "OK" || echo "FAIL"
 }
