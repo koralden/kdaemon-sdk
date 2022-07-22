@@ -42,6 +42,9 @@ use tokio::time::{self, Duration};
 use tracing::{debug, info/*, error*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use fika_easy_setup::kap_boss::BossMenu;
+use fika_easy_setup::kap_core::CoreMenu;
+
 #[derive(Parser, Debug, Clone)]
 #[clap(
     name = "fika-easy-setup",
@@ -75,12 +78,8 @@ struct Opt {
     #[clap(long = "password"/*, default_value = "tester"*/)]
     client_password: Option<String>,
 
-    #[clap(
-        short = 'w',
-        long = "wallet",
-        default_value = "5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT"
-    )]
-    wallet_addr: String,
+    #[clap(short = 'w', long = "wallet")]
+    wallet_addr: Option<String>,
 
     #[clap(long = "static-dir", default_value = "../templates")]
     static_dir: String,
@@ -90,12 +89,14 @@ struct Opt {
     #[clap(long = "private-key", default_value = "certs/key.pem")]
     private_key: String,
 
-    #[clap(long = "api-url", default_value = "https://oss-api.k36588.info")]
-    api_url: String,
-    #[clap(long = "access-token", default_value = "ce18d7a0940719a00da82448b38c90b2")]
-    access_token: String,
-    #[clap(long = "otp-path", default_value = "v0/ap/otp")]
-    otp_path: String,
+    #[clap(long = "api-url")]
+    api_url: Option<String>,
+    #[clap(long = "access-token")]
+    access_token: Option<String>,
+    #[clap(long = "access-token-ap")]
+    access_token_ap: Option<String>,
+    #[clap(long = "otp-path")]
+    otp_path: Option<String>,
     #[clap(long = "mac-address", default_value = "A1:A2:33:44:55:66")]
     mac_address: String,
 }
@@ -141,11 +142,47 @@ async fn private_service(mut opt: Opt) {
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
 
+    let mut api_url = opt.api_url;
+    let mut access_token = opt.access_token;
+    let mut otp_path = opt.otp_path;
+    let mut wallet = opt.wallet_addr;
+    let mut access_token_ap = opt.access_token_ap;
+
+    if let Ok(mut db_conn) = cache.get_async_connection().await {
+        /*let wallet = wallet.map_or_else(|e| {
+            let core = db_conn.get::<&str, String>("kap.core").await
+                .or(Err("kap.core not found"))
+                .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
+            /*if let Ok(core) = core {
+                wallet = core.wallet_address;
+            }*/
+            core.map_or(None, |c| Some(c.wallet_address))
+        }, |v| Some(v));*/
+
+        let value = db_conn.get::<&str, String>("kap.core").await
+            .or(Err("kap.core not found"))
+            .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
+        if let Ok(value) = value {
+            wallet = wallet.or(Some(value.wallet_address));
+        }
+        let value = db_conn.get::<&str, String>("kap.boss").await
+            .or(Err("kap.boss not found"))
+            .and_then(|s| serde_json::from_str::<BossMenu>(&s).or(Err("json convert fail")));
+        if let Ok(value) = value {
+            api_url = api_url.or(Some(value.root_url));
+            access_token = access_token.or(Some(value.access_token));
+            otp_path = otp_path.or(Some(value.otp_path));
+        }
+        let value = db_conn.get::<&str, String>("kap.boss.ap.token").await;
+        if let Ok(value) = value {
+            access_token_ap = access_token_ap.or(Some(value));
+        }
+    }
+
     let otp = ServerCtx::new(
-        &opt.api_url,
-        &opt.access_token,
-        &opt.otp_path,
-        &opt.wallet_addr,
+        api_url, otp_path,
+        access_token, access_token_ap,
+        wallet,
 
         opt.client_username.take(),
         opt.client_password.take(),
@@ -533,8 +570,9 @@ struct InternalServerCtx {
 #[derive(Debug, Serialize, Deserialize)]
 struct ServerCtx {
     api_url: String,
-    access_token: String,
     otp_path: String,
+    access_token: String,
+    access_token_ap: String,
     wallet: String,
 
     /* authenticate */
@@ -545,15 +583,22 @@ struct ServerCtx {
 }
 
 impl ServerCtx {
-    fn new(api_url: &str, access_token: &str, otp_path: &str,
-           wallet: &str,
+    fn new(api_url: Option<String>, otp_path: Option<String>,
+           access_token: Option<String>, access_token_ap: Option<String>,
+           wallet: Option<String>,
            login_name: Option<String>, login_password: Option<String>,
     ) -> Self {
         ServerCtx {
-            api_url: api_url.to_string(),
-            access_token: access_token.to_string(),
-            otp_path: otp_path.to_string(),
-            wallet: wallet.to_string(),
+            api_url:
+                api_url.map_or("https://oss-api.k36588.info".to_owned(), |v| v),
+            access_token:
+                access_token.map_or("ce18d7a0940719a00da82448b38c90b2".to_owned(), |v| v),
+            access_token_ap:
+                access_token_ap.map_or("02ec7a905b70689d9b30c6118fd1e62f".to_owned(), |v| v),
+            otp_path:
+                otp_path.map_or("v0/ap/otp".to_owned(), |v| v),
+            wallet:
+                wallet.map_or("5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT".to_owned(), |v| v),
 
             login_name,
             login_password,
@@ -581,6 +626,7 @@ impl ServerCtx {
                 .get(&url)
                 //.bearer_auth(token.access_token().secret())
                 .header("ACCESSTOKEN", &self.access_token)
+                .header("ACCESSTOKEN-AP", &self.access_token_ap)
                 .query(&[("ap_wallet", &self.wallet)/*, ("ap_mac", &mac)*/])
                 .send()
                 .await?
@@ -762,14 +808,15 @@ async fn create_pairing(
 struct HonestChallenge {
     ap_wallet: Option<String>,
     token: Option<String>,
+    code: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct BossHcsPair {
-    hsc_token: String,
+    hcs_sid: String,
+    hcs_token: String,
     init_time: DateTime<Utc>,
     invalid_time: DateTime<Utc>,
-    code: u16,
 }
 
 async fn honest_challenge(
@@ -783,47 +830,52 @@ async fn honest_challenge(
     let mut challenge = HonestChallenge {
         ap_wallet: None,
         token: None,
+        code: 404, // not-found
     };
 
     let mut conn = cache.get_async_connection().await.unwrap();
 
-    if let Ok(hashed) = conn.get::<String, String>(format!("honest.challenger.{}", challenger_id)).await {
-        info!("redis get honest.challenger {:?} have handled", &challenger_id);
-        challenge.token = Some(hashed);
-        (StatusCode::NOT_ACCEPTABLE, Json(challenge))
-    } else {
-        if let Ok(token) = conn.get::<&str, String>("boss.hcs.token").await {
-            debug!("redis get boss.hcs.token ^{}$ success", token);
-            if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
-                let now = Utc::now();
+    if let Ok(token) = conn.lindex::<&str, String>("boss.hcs.token.list", 0).await {
+        debug!("redis boss.hcs.token.list first ^{}$ success", token);
+        if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
+            let now = Utc::now();
 
-                if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
-                    challenge.token = Some(boss_hcs.hsc_token);
-                    challenge.ap_wallet = Some(server_ctx.wallet.clone());
-                    return (StatusCode::OK, Json(challenge));
+            if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
+                let key = format!("boss.hcs.challengers.{}", boss_hcs.hcs_sid);
+                // XXX, Vec<String> to HashMap<String,..>?
+                if let Ok(exist) = conn.hget::<&str, &str, bool>(&key, &challenger_id).await {
+                    if exist {
+                        debug!("{} has challenged in this task", &challenger_id);
+                        challenge.code = 406;
+                        return (StatusCode::OK, Json(challenge));
+                    }
                 }
+
+                challenge.token = Some(boss_hcs.hcs_token);
+                challenge.ap_wallet = Some(server_ctx.wallet.clone());
+                challenge.code = 200;
+                return (StatusCode::OK, Json(challenge));
             }
         }
-
-        debug!("redis get boss.hcs.token fail");
-        (StatusCode::NOT_FOUND, Json(challenge))
     }
+
+    debug!("redis get boss.hcs.token.list fail");
+    (StatusCode::OK, Json(challenge))
 }
 
-async fn post_honest_challenge<'a>(
+async fn honest_challenge_db_update<'a>(
+    mut conn: redis::aio::Connection,
     challenger_id: &'a str,
     hashed: &'a str,
-    mut conn: redis::aio::Connection,
+    sid: &'a str,
 ) -> Result<bool> {
-    let expired = 60 * 60 * 12; /* 12 hr */
-    let key = format!("honest.challenger.{}", challenger_id);
+    let value = serde_json::json!({
+        "hashed": hashed,
+        "sent": false
+    });
+    let key = format!("boss.hcs.challengers.{}", sid);
     let _ = conn
-        .set_ex::<&str, &str, _>(&key, hashed, expired)
-        .await?;
-
-    let report = "honest.challenger.report";
-    let _ = conn
-        .lpush::<&str, &str, _>(report, challenger_id)
+        .hset::<&str, &str, &str, _>(&key, challenger_id, &value.to_string())
         .await?;
 
     let notify = "honest.challenger";
@@ -839,32 +891,45 @@ async fn update_honest_challenge(
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if challenge.ap_wallet.is_none() {
-        return (StatusCode::NOT_FOUND, Json(challenge));
-    }
-    if let Some(ref ap_wallet) = challenge.ap_wallet {
-        if ap_wallet != &server_ctx.wallet {
-            return (StatusCode::NOT_FOUND, Json(challenge));
-        }
-    }
-
-    if let Some(ref hashed) = challenge.token {
-        if let Ok(conn) = cache.get_async_connection().await {
-            let ret = post_honest_challenge(&challenger_id, hashed, conn).await;
-
-            dbg!(&ret);
-
-            if ret.is_ok() {
-                (StatusCode::OK, Json(challenge))
-            } else {
-                (StatusCode::NOT_FOUND, Json(challenge))
+    let mut resp = HonestChallenge {
+        ap_wallet: None,
+        token: None,
+        code: 200,
+    };
+    match (challenge.ap_wallet, challenge.token) {
+        (Some(ref wallet), Some(ref hashed)) => {
+            if wallet != &server_ctx.wallet {
+                resp.code = 405; //METHOD_NOT_ALLOWED;
+                return (StatusCode::OK, Json(resp));
             }
-        } else {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(challenge))
-        }
-    } else {
-        (StatusCode::NOT_FOUND, Json(challenge))
+            if let Ok(mut conn) = cache.get_async_connection().await {
+                if let Ok(token) = conn.lindex::<&str, String>("boss.hcs.token.list", 0).await {
+                    debug!("redis boss.hcs.token.list first ^{}$ success", token);
+                    if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
+                        let now = Utc::now();
+
+                        if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
+                            let ret = honest_challenge_db_update(conn, &challenger_id, hashed, &boss_hcs.hcs_sid).await;
+                            dbg!(&ret);
+                            if ret.is_err() {
+                                resp.code = 404; // StatusCode::NOT_FOUND
+                            }
+                        } else {
+                            resp.code = 404; //StatusCode::INTERNAL_SERVER_ERROR
+                        }
+                    } else {
+                        resp.code = 404; //StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                }
+            } else {
+                resp.code = 500; //StatusCode::INTERNAL_SERVER_ERROR
+            }
+        },
+        (_, _) => {
+            resp.code = 404;
+        },
     }
+    (StatusCode::OK, Json(resp))
 }
 
 /*#[derive(Serialize, Deserialize, Debug)]
