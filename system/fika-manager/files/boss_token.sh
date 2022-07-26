@@ -33,9 +33,9 @@ get_access_token_ap() {
 
 post_challenger() {
     sid=$1 && shift
-    challengeId && shift
+    challengeId=$1 && shift
 
-    challenger=$(redis-cli --raw HGET boss.hcs.challengers.${sid} ${challengeId)
+    challenger=$(redis-cli --raw HGET boss.hcs.challengers.${sid} ${challengeId})
     hashed=$(echo $challenger | jq -r .hashed)
 
     json=$(jq -rcM --null-input \
@@ -105,6 +105,8 @@ my_log debug "accesstokenAp: $accesstokenAp"
 
 [ -z "$rootUrl" -o -z "$accesstoken" -o -z "$accesstokenAp" -o -z "$kapWallet" ] && exit 127
 
+remove_expired_task
+
 response=$(curl -s -H "ACCESSTOKEN:${accesstoken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -X GET "${rootUrl}/${hcsPath}?ap_wallet=${kapWallet}")
 [ $DEBUG -eq 1 ] && response='{"hcs":[{"hcs_sid":"2022072215014100001","hcs_token":"94efde4c624ce129eab0756b52897de3","init_time":"2022-07-22T15:01:41+0800","invalid_time":"2022-07-22T16:19:41+0800"},{"hcs_sid":"2022072216012700001","hcs_token":"9f2d802c8f8854f82cc9ea9e5390c26f","init_time":"2022-07-22T16:01:27+0800","invalid_time":"2022-07-22T17:18:27+0800"}],"code":200}'
 
@@ -122,7 +124,7 @@ if [ $code -eq 200 ]; then
                 echo "=>$item<="
                 redis-cli rpush boss.hcs.token.list "$item"
             else
-                my_log info "item - ${item} alread in"
+                my_log info "item - ${item} already in"
             fi
         done
 

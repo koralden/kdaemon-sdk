@@ -128,7 +128,7 @@ async fn main() {
 
     let http = tokio::spawn(public_service(
             opt.public_addr.clone(), opt.public_port,
-            opt.redis_addr.clone(),
+            opt.redis_addr.clone(), opt.wallet_addr.clone(),
             opt.certificate.clone(), opt.private_key.clone()));
     let https = tokio::spawn(private_service(opt));
 
@@ -228,11 +228,20 @@ async fn private_service(mut opt: Opt) {
 }
 
 async fn public_service(public_addr: String, public_port: u16,
-    redis_addr: String,
+    redis_addr: String, mut wallet: Option<String>,
     cert: String, private_key: String,
 ) {
     let redis_addr = format!("redis://{}/", redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
+
+    if let Ok(mut db_conn) = cache.get_async_connection().await {
+        let value = db_conn.get::<&str, String>("kap.core").await
+            .or(Err("kap.core not found"))
+            .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
+        if let Ok(value) = value {
+            wallet = wallet.or(Some(value.wallet_address));
+        }
+    }
 
     let app = Router::new()
         .route(
@@ -244,6 +253,7 @@ async fn public_service(public_addr: String, public_port: u16,
             get(public_opennds_fas),
         )
         .layer(Extension(cache))
+        .layer(Extension(wallet.unwrap()))
         .into_make_service_with_connect_info::<SocketAddr>();
         
     let addr = SocketAddr::from((
@@ -805,8 +815,19 @@ async fn create_pairing(
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct HonestChallenge {
-    ap_wallet: Option<String>,
+struct HonestChallengeResponse {
+    code: u16,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct HonestChallengeRequest {
+    gw_id: String,
+    hashed: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct HonestChallengeContent {
+    gw_id: Option<String>,
     token: Option<String>,
     code: u16,
 }
@@ -819,115 +840,132 @@ struct BossHcsPair {
     invalid_time: DateTime<Utc>,
 }
 
+impl BossHcsPair {
+    async fn get(conn: &mut redis::aio::Connection) -> Result<BossHcsPair> {
+        if let Ok(token) = conn.lindex::<&str, String>("boss.hcs.token.list", 0).await {
+            debug!("redis boss.hcs.token.list first ^{}$ success", token);
+            if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
+                let now = Utc::now();
+                if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
+                    return Ok(boss_hcs);
+                }
+            }
+        }
+        Err(anyhow::anyhow!("HCS task not found"))
+    }
+
+    async fn new_challenge(&self, conn: &mut redis::aio::Connection, challenger_id: &str) -> Result<()> {
+        let key = format!("boss.hcs.challengers.{}", self.hcs_sid);
+        if let Ok(exist) = conn.hexists::<&str, &str, bool>(&key, challenger_id).await {
+            if exist {
+                return Err(anyhow::anyhow!("{} have challenged in {} session",
+                                           challenger_id, self.hcs_sid));
+            }
+        }
+
+        return Ok(());
+    }
+
+    async fn push_server(&self, conn: &mut redis::aio::Connection, challenger_id: &str, hashed: &str) -> Result<()> {
+        let value = serde_json::json!({
+            "hashed": hashed,
+            "sent": false
+        });
+        let key = format!("boss.hcs.challengers.{}", self.hcs_sid);
+        let _ = conn
+            .hset::<&str, &str, &str, _>(&key, challenger_id, &value.to_string())
+            .await?;
+
+        let notify = "honest.challenger";
+        let _ = conn
+            .publish::<&str, &str, _>(notify, challenger_id)
+            .await?;
+        Ok(())
+    }
+}
+
 async fn honest_challenge(
     Path(challenger_id): Path<String>,
     Extension(cache): Extension<redis::Client>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Extension(server_ctx): Extension<Arc<ServerCtx>>,
+    Extension(wallet): Extension<String>,
 ) -> impl IntoResponse {
     info!("client ip-address {}", addr);
 
-    let mut challenge = HonestChallenge {
-        ap_wallet: None,
+    let mut challenge = HonestChallengeContent {
+        gw_id: None,
         token: None,
         code: 404, // not-found
     };
 
-    let mut conn = cache.get_async_connection().await.unwrap();
-
-    if let Ok(token) = conn.lindex::<&str, String>("boss.hcs.token.list", 0).await {
-        debug!("redis boss.hcs.token.list first ^{}$ success", token);
-        if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
-            let now = Utc::now();
-
-            if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
-                let key = format!("boss.hcs.challengers.{}", boss_hcs.hcs_sid);
-                // XXX, Vec<String> to HashMap<String,..>?
-                if let Ok(exist) = conn.hget::<&str, &str, bool>(&key, &challenger_id).await {
-                    if exist {
-                        debug!("{} has challenged in this task", &challenger_id);
-                        challenge.code = 406;
-                        return (StatusCode::OK, Json(challenge));
+    if let Ok(mut conn) = cache.get_async_connection().await {
+        match BossHcsPair::get(&mut conn).await {
+            Ok(hcs) => {
+                if hcs.new_challenge(&mut conn, &challenger_id)
+                    .await.is_ok()
+                    {
+                        challenge.token = Some(hcs.hcs_token);
+                        challenge.gw_id = Some(wallet.clone());
+                        challenge.code = 200;
                     }
+                else {
+                    debug!("{} has challenged in this task", &challenger_id);
+                    challenge.code = 406;
                 }
-
-                challenge.token = Some(boss_hcs.hcs_token);
-                challenge.ap_wallet = Some(server_ctx.wallet.clone());
-                challenge.code = 200;
-                return (StatusCode::OK, Json(challenge));
+            },
+            Err(_) => {
+                debug!("No challenge task");
+                challenge.code = 404;
             }
         }
+    } else {
+        debug!("internal DB server error");
     }
 
-    debug!("redis get boss.hcs.token.list fail");
     (StatusCode::OK, Json(challenge))
-}
-
-async fn honest_challenge_db_update<'a>(
-    mut conn: redis::aio::Connection,
-    challenger_id: &'a str,
-    hashed: &'a str,
-    sid: &'a str,
-) -> Result<bool> {
-    let value = serde_json::json!({
-        "hashed": hashed,
-        "sent": false
-    });
-    let key = format!("boss.hcs.challengers.{}", sid);
-    let _ = conn
-        .hset::<&str, &str, &str, _>(&key, challenger_id, &value.to_string())
-        .await?;
-
-    let notify = "honest.challenger";
-    let _ = conn
-        .publish::<&str, &str, _>(notify, challenger_id)
-        .await?;
-    Ok(true)
 }
 
 async fn update_honest_challenge(
     Path(challenger_id): Path<String>,
-    Json(challenge): Json<HonestChallenge>,
+    Json(hc_request): Json<HonestChallengeRequest>,
     Extension(cache): Extension<redis::Client>,
-    Extension(server_ctx): Extension<Arc<ServerCtx>>,
+    Extension(wallet): Extension<String>,
 ) -> impl IntoResponse {
-    let mut resp = HonestChallenge {
-        ap_wallet: None,
-        token: None,
-        code: 200,
+    let mut resp = HonestChallengeResponse {
+        code: 404, // not-found
     };
-    match (challenge.ap_wallet, challenge.token) {
-        (Some(ref wallet), Some(ref hashed)) => {
-            if wallet != &server_ctx.wallet {
-                resp.code = 405; //METHOD_NOT_ALLOWED;
-                return (StatusCode::OK, Json(resp));
-            }
-            if let Ok(mut conn) = cache.get_async_connection().await {
-                if let Ok(token) = conn.lindex::<&str, String>("boss.hcs.token.list", 0).await {
-                    debug!("redis boss.hcs.token.list first ^{}$ success", token);
-                    if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
-                        let now = Utc::now();
 
-                        if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
-                            let ret = honest_challenge_db_update(conn, &challenger_id, hashed, &boss_hcs.hcs_sid).await;
-                            dbg!(&ret);
-                            if ret.is_err() {
-                                resp.code = 404; // StatusCode::NOT_FOUND
-                            }
-                        } else {
-                            resp.code = 404; //StatusCode::INTERNAL_SERVER_ERROR
-                        }
+    if &hc_request.gw_id != &wallet {
+        resp.code = 405; //METHOD_NOT_ALLOWED;
+        return (StatusCode::OK, Json(resp));
+    }
+
+    if let Ok(mut conn) = cache.get_async_connection().await {
+        match BossHcsPair::get(&mut conn).await {
+            Ok(hcs) => {
+                if hcs.new_challenge(&mut conn, &challenger_id)
+                    .await.is_ok()
+                {
+                    if hcs.push_server(&mut conn, &challenger_id, &hc_request.hashed)
+                        .await.is_ok()
+                    {
+                        resp.code = 200;
                     } else {
-                        resp.code = 404; //StatusCode::INTERNAL_SERVER_ERROR
+                        debug!("{} push srever error", &challenger_id);
+                        resp.code = 502; //BAD_GATEWAY
                     }
+                } else {
+                    debug!("{} has challenged in this task", &challenger_id);
+                    resp.code = 406;
                 }
-            } else {
-                resp.code = 500; //StatusCode::INTERNAL_SERVER_ERROR
+            },
+            Err(_) => {
+                debug!("No challenge task");
+                resp.code = 404;
             }
-        },
-        (_, _) => {
-            resp.code = 404;
-        },
+        }
+    } else {
+        resp.code = 500; //StatusCode::INTERNAL_SERVER_ERROR
     }
     (StatusCode::OK, Json(resp))
 }
