@@ -345,35 +345,16 @@ where
 
 async fn do_simple_auth(
     Form(login): Form<SimpleUser>,
-    Extension(server): Extension<Arc<ServerCtx>>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
     Extension(store): Extension<MemoryStore>,
 ) -> impl IntoResponse /*Html<&'static str>*/ {
     dbg!(&login);
-    dbg!(&server);
+    dbg!(&server_ctx);
 
     let mut headers = HeaderMap::new();
 
-    if let Some(username) = &server.login_name {
-        if username != &login.name {
-            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
-        }
-    } else if let Ok(username) = env::var("LOGIN_NAME") {
-        if username != login.name {
-            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
-        }
-    } else if let Some(password) = &server.login_password {
-        if password != &login.password {
-            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
-        }
-    } else if let Ok(password) = env::var("LOGIN_PASSWORD") {
-        if password != login.password {
-            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
-        }
-    } else if let Ok(spassword) = server.get_shadow_password(&login.name) {
-        debug!("[debug] compare password = ^{}$", spassword);
-        if spassword.len() != 0 && pwhash::unix::verify(&login.password, &spassword) == false {
-            return (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
-        }
+    if server_ctx.do_login(&login.name, &login.password).is_err() {
+        return (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
     }
 
     // Create a new session filled with user data
@@ -423,21 +404,22 @@ impl IntoResponse for AuthRedirect {
 async fn show_network_setup(
     user: Option<SimpleUser>,
     Extension(cache): Extension<redis::Client>,
+    Extension(server): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if user.is_none() {
-        Html(std::include_str!("../templates/login.html")).into_response()
-    } else {
-        let mut cfg = String::from(
-            r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#,
-        );
-        if let Ok(mut conn) = cache.get_async_connection().await {
-            cfg = conn
-                .get::<&str, String>("kdaemon.easy.setup")
-                .await
-                .unwrap_or_else(|_| "{}".into());
-        }
-        Html(EASY_SETUP_TEMP.replace("{{ getJson }}", &cfg)).into_response()
+    if server.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
+
+    let mut cfg = String::from(
+        r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#,
+        );
+    if let Ok(mut conn) = cache.get_async_connection().await {
+        cfg = conn
+            .get::<&str, String>("kdaemon.easy.setup")
+            .await
+            .unwrap_or_else(|_| "{}".into());
+    }
+    Html(EASY_SETUP_TEMP.replace("{{ getJson }}", &cfg)).into_response()
 }
 
 // Valid user session required. If there is none, redirect to the auth page
@@ -445,53 +427,54 @@ async fn update_network_setup(
     user: Option<SimpleUser>,
     Form(cfg): Form<NetworkConfig>,
     Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if user.is_none() {
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
-    } else {
-        dbg!(&cfg);
+    if server_ctx.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+    }
 
-        let msg = match serde_json::to_string(&cfg) {
-            Ok(c) => c,
-            Err(e) => {
-                dbg!(&e);
-                "{}".into()
-            }
+    dbg!(&cfg);
+
+    let msg = match serde_json::to_string(&cfg) {
+        Ok(c) => c,
+        Err(e) => {
+            dbg!(&e);
+            "{}".into()
+        }
+    };
+
+    if let Ok(mut conn) = cache.get_async_connection().await {
+        conn.set::<&str, &str, String>("kdaemon.easy.setup", &msg)
+            .await
+            .unwrap();
+        conn.publish::<&str, &str, usize>("kdaemon.easy.setup", &msg)
+            .await
+            .unwrap();
+
+        let mut sub_conn = conn.into_pubsub();
+        sub_conn.subscribe("kdaemon.easy.setup.ack").await.unwrap();
+        let mut sub_stream = sub_conn.on_message();
+
+        /*TODO, ui/ux display progress for this long-term job */
+        let resp = tokio::select! {
+            Some(res) = sub_stream.next() => {
+                //res.get_payload::<String>().unwrap(),
+                match res.get_payload::<String>() {
+                    Ok(_) => {
+                        //auth.renew();
+                        "rocket".to_string()
+                    },
+                    _ => "NG".to_string(),
+                }
+            },
+            _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
         };
 
-        if let Ok(mut conn) = cache.get_async_connection().await {
-            conn.set::<&str, &str, String>("kdaemon.easy.setup", &msg)
-                .await
-                .unwrap();
-            conn.publish::<&str, &str, usize>("kdaemon.easy.setup", &msg)
-                .await
-                .unwrap();
-
-            let mut sub_conn = conn.into_pubsub();
-            sub_conn.subscribe("kdaemon.easy.setup.ack").await.unwrap();
-            let mut sub_stream = sub_conn.on_message();
-
-            /*TODO, ui/ux display progress for this long-term job */
-            let resp = tokio::select! {
-                Some(res) = sub_stream.next() => {
-                    //res.get_payload::<String>().unwrap(),
-                    match res.get_payload::<String>() {
-                        Ok(_) => {
-                            //auth.renew();
-                            "rocket".to_string()
-                        },
-                        _ => "NG".to_string(),
-                    }
-                },
-                _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
-            };
-
-            get_result_emoji("Setup Done", &resp).await.into_response()
-        } else {
-            dbg!(&msg);
-            let resp = "NG".to_string();
-            get_result_emoji("Setup Fail", &resp).await.into_response()
-        }
+        get_result_emoji("Setup Done", &resp).await.into_response()
+    } else {
+        dbg!(&msg);
+        let resp = "NG".to_string();
+        get_result_emoji("Setup Fail", &resp).await.into_response()
     }
 }
 
@@ -693,6 +676,58 @@ impl ServerCtx {
             None => Err(anyhow::anyhow!("User {} password not found", username)),
         }
     }
+
+    fn need_login(&self, user: Option<SimpleUser>) -> Result<()> {
+        debug!("need_login user {:?}", user);
+        if user.is_none() {
+            if let Ok(name) = env::var("LOGIN_NAME") {
+                if let Ok(_) = env::var("LOGIN_PASSWORD") {
+                    debug!("need_login LOGIN_PASSWORD for {}", name);
+                    return Err(anyhow::anyhow!("User {} admin need login", name));
+                }
+            } else if let Some(name) = &self.login_name {
+                if let Some(_) = &self.login_password {
+                    debug!("need_login {:?} for {}", &self.login_password, name);
+                    return Err(anyhow::anyhow!("User {} admin need login", name));
+                }
+            } else {
+                if let Ok(spwd) = self.get_shadow_password("admin") {
+                    if spwd.len() != 0 {
+                        debug!("need_login shadow for {}", "admin");
+                        return Err(anyhow::anyhow!("User admin need login"));
+                    }
+                }
+            }
+
+        }
+        Ok(())
+    }
+
+    fn do_login(&self, user: &str, passwd: &str) -> Result<()> {
+        if let Some(username) = &self.login_name {
+            if username != user {
+                return Err(anyhow::anyhow!("User-name not match"));
+            }
+        } else if let Ok(username) = env::var("LOGIN_NAME") {
+            if &username != user {
+                return Err(anyhow::anyhow!("Env user-name not match"));
+            }
+        } else if let Some(password) = &self.login_password {
+            if password != &passwd {
+                return Err(anyhow::anyhow!("Password not match"));
+            }
+        } else if let Ok(password) = env::var("LOGIN_PASSWORD") {
+            if &password != passwd {
+                return Err(anyhow::anyhow!("Env password not match"));
+            }
+        } else if let Ok(spassword) = self.get_shadow_password(user) {
+            if spassword.len() != 0 && pwhash::unix::verify(&passwd, &spassword) == false {
+                return Err(anyhow::anyhow!("Shadow password not match"));
+            }
+        }
+        Ok(())
+    }
+
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -706,44 +741,44 @@ struct KAppOtp {
 #[debug_handler]
 async fn show_pairing(
     user: Option<SimpleUser>,
-    Extension(otp): Extension<Arc<ServerCtx>>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if user.is_none() {
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
-    } else {
-        let pincode = otp.rest_get().await.ok();
-        let app_otp = otp.as_app_query(pincode).unwrap();
+    if server_ctx.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+    }
 
-        let cfg = serde_json::to_string(&app_otp).unwrap();
-        let code = QrCode::new(cfg.into_bytes()).unwrap();
-        let mut image = code
-            .render()
-            .min_dimensions(60, 60)
-            .max_dimensions(360, 360)
-            .light_color(svg::Color("#696969"))
-            .dark_color(svg::Color("#fff"))
-            .quiet_zone(true)
-            .build()
-            .into_bytes();
-        image.push(b'\n');
+    let pincode = server_ctx.rest_get().await.ok();
+    let app_otp = server_ctx.as_app_query(pincode).unwrap();
 
-        /* TODO implement check paired flow */
-        /*let paired = if otp.wallet != Some(opt.wallet_addr) {
-            paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, otp.wallet.as_ref().unwrap());
-        } else {
-            paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, otp.wallet.as_ref().unwrap());
-        };*/
-        let paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, &app_otp.ap_wallet);
+    let cfg = serde_json::to_string(&app_otp).unwrap();
+    let code = QrCode::new(cfg.into_bytes()).unwrap();
+    let mut image = code
+        .render()
+        .min_dimensions(60, 60)
+        .max_dimensions(360, 360)
+        .light_color(svg::Color("#696969"))
+        .dark_color(svg::Color("#fff"))
+        .quiet_zone(true)
+        .build()
+        .into_bytes();
+    image.push(b'\n');
 
-        Html(
-            PAIRING_TEMP
-                .replace("{{ content }}", &String::from_utf8_lossy(&image))
-                .replace("{{ getJson }}", &paired)
-                .replace("{{ otp }}", &app_otp.otp)
-                .replace("{{ routerId }}", &app_otp.ap_wallet),
+    /* TODO implement check paired flow */
+    /*let paired = if server_ctx.wallet != Some(opt.wallet_addr) {
+      paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, server_ctx.wallet.as_ref().unwrap());
+      } else {
+      paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, server_ctx.wallet.as_ref().unwrap());
+      };*/
+    let paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, &app_otp.ap_wallet);
+
+    Html(
+        PAIRING_TEMP
+        .replace("{{ content }}", &String::from_utf8_lossy(&image))
+        .replace("{{ getJson }}", &paired)
+        .replace("{{ otp }}", &app_otp.otp)
+        .replace("{{ routerId }}", &app_otp.ap_wallet),
         )
         .into_response()
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -756,62 +791,62 @@ async fn create_pairing(
     user: Option<SimpleUser>,
     Json(input): Json<PairingCfg>,
     Extension(cache): Extension<redis::Client>,
-    Extension(otp_code): Extension<Arc<ServerCtx>>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if user.is_none() {
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
-    } else {
-        dbg!(&input);
-        let mut conn = cache.get_async_connection().await.unwrap();
-
-        /* input.otp need check or frondend check? */
-        let otp = input.otp;
-        /* check if have got otp from nms(<-cmp) */
-        if let Ok(saved_otp) = conn.get::<&str, String>("nms.pairing.otp").await {
-            if saved_otp == otp {
-                return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
-                    .await
-                    .into_response();
-            }
-        }
-
-        let iot = IotPairingCfg {
-            wallet: Some(otp_code.wallet.clone()),
-            expire: None,
-            otp: Some(otp),
-        };
-
-        let msg = serde_json::to_string(&iot).unwrap();
-        conn.publish::<&str, &str, usize>("nms.shadow.update.pairing", &msg)
-            .await
-            .unwrap();
-
-        let mut sub_conn = conn.into_pubsub();
-        sub_conn.subscribe("nms.pairing.status").await.unwrap();
-        let mut sub_stream = sub_conn.on_message();
-
-        /*TODO, ui/ux display progress for this long-term job */
-        let resp = tokio::select! {
-            Some(res) = sub_stream.next() => {
-                match res.get_payload::<String>() {
-                    Ok(status) => {
-                        if status.eq("success") {
-                            "rocket".to_string()
-                        }
-                        else {
-                            "thumbs down".to_string()
-                        }
-                    },
-                    _ => "pick".to_string(),
-                }
-            },
-            _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
-        };
-
-        get_result_emoji(&format!("Pairing {}", resp), &resp)
-            .await
-            .into_response()
+    if server_ctx.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
+
+    dbg!(&input);
+    let mut conn = cache.get_async_connection().await.unwrap();
+
+    /* input.otp need check or frondend check? */
+    let otp = input.otp;
+    /* check if have got otp from nms(<-cmp) */
+    if let Ok(saved_otp) = conn.get::<&str, String>("nms.pairing.otp").await {
+        if saved_otp == otp {
+            return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
+                .await
+                .into_response();
+        }
+    }
+
+    let iot = IotPairingCfg {
+        wallet: Some(server_ctx.wallet.clone()),
+        expire: None,
+        otp: Some(otp),
+    };
+
+    let msg = serde_json::to_string(&iot).unwrap();
+    conn.publish::<&str, &str, usize>("nms.shadow.update.pairing", &msg)
+        .await
+        .unwrap();
+
+    let mut sub_conn = conn.into_pubsub();
+    sub_conn.subscribe("nms.pairing.status").await.unwrap();
+    let mut sub_stream = sub_conn.on_message();
+
+    /*TODO, ui/ux display progress for this long-term job */
+    let resp = tokio::select! {
+        Some(res) = sub_stream.next() => {
+            match res.get_payload::<String>() {
+                Ok(status) => {
+                    if status.eq("success") {
+                        "rocket".to_string()
+                    }
+                    else {
+                        "thumbs down".to_string()
+                    }
+                },
+                _ => "pick".to_string(),
+            }
+        },
+        _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+    };
+
+    get_result_emoji(&format!("Pairing {}", resp), &resp)
+        .await
+        .into_response()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1028,28 +1063,28 @@ struct SystemChecking {
 async fn system_checking(
     user: Option<SimpleUser>,
     Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if user.is_none() {
-        //Redirect::temporary(API_PATH_SETUP_EASY).into_response()
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
-    } else {
-        let mut emoji = String::from("prohibited");
-        if let Ok(mut conn) = cache.get_async_connection().await {
-            match conn.get::<&str, String>("kdaemon.system.checking").await {
-                Ok(data) => {
-                    if let Ok(sc) = serde_json::from_str::<SystemChecking>(&data) {
-                        if sc.code == 200 {
-                            emoji = "rocket".to_string();
-                        }
+    if server_ctx.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+    }
+
+    let mut emoji = String::from("prohibited");
+    if let Ok(mut conn) = cache.get_async_connection().await {
+        match conn.get::<&str, String>("kdaemon.system.checking").await {
+            Ok(data) => {
+                if let Ok(sc) = serde_json::from_str::<SystemChecking>(&data) {
+                    if sc.code == 200 {
+                        emoji = "rocket".to_string();
                     }
                 }
-                Err(_) => {}
             }
+            Err(_) => {}
         }
-        get_result_emoji("System Check...", &emoji)
-            .await
-            .into_response()
     }
+    get_result_emoji("System Check...", &emoji)
+        .await
+        .into_response()
 }
 
 const POR_TEMP: &str = std::include_str!("../templates/por.html");
@@ -1082,20 +1117,22 @@ async fn por_wifi(
     user: Option<SimpleUser>,
     payload: Option<Json<PorCfg>>,
     Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    if user.is_none() {
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
-    } else {
-        dbg!(&payload);
+    if server_ctx.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+    }
 
-        if let Some(Json(input)) = payload {
-            let msg = serde_json::to_string(&input).unwrap();
-            let mut resp = "thumbs down".to_string();
+    dbg!(&payload);
 
-            if let Ok(mut conn) = cache.get_async_connection().await {
-                match conn
-                    .set::<&str, &str, String>("kdaemon.por.config", &msg)
-                    .await
+    if let Some(Json(input)) = payload {
+        let msg = serde_json::to_string(&input).unwrap();
+        let mut resp = "thumbs down".to_string();
+
+        if let Ok(mut conn) = cache.get_async_connection().await {
+            match conn
+                .set::<&str, &str, String>("kdaemon.por.config", &msg)
+                .await
                 {
                     Ok(_) => {}
                     Err(_e) => {
@@ -1103,45 +1140,44 @@ async fn por_wifi(
                     }
                 }
 
-                conn.publish::<&str, &str, usize>("kdaemon.por.config", &msg)
-                    .await
-                    .unwrap();
+            conn.publish::<&str, &str, usize>("kdaemon.por.config", &msg)
+                .await
+                .unwrap();
 
-                let mut sub_conn = conn.into_pubsub();
-                sub_conn.subscribe("kdaemon.por.config.ack").await.unwrap();
-                let mut sub_stream = sub_conn.on_message();
+            let mut sub_conn = conn.into_pubsub();
+            sub_conn.subscribe("kdaemon.por.config.ack").await.unwrap();
+            let mut sub_stream = sub_conn.on_message();
 
-                resp = tokio::select! {
-                    Some(res) = sub_stream.next() => {
-                        match res.get_payload::<String>() {
-                            Ok(status) => {
-                                if status.eq("success") {
-                                    "rocket".to_string()
-                                }
-                                else {
-                                    "thumbs down".to_string()
-                                }
-                            },
-                            _ => "pick".to_string(),
-                        }
-                    },
-                    _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
-                };
-            } else {
-                dbg!(&msg);
-            }
-
-            get_result_emoji("PoR service", &resp).await.into_response()
+            resp = tokio::select! {
+                Some(res) = sub_stream.next() => {
+                    match res.get_payload::<String>() {
+                        Ok(status) => {
+                            if status.eq("success") {
+                                "rocket".to_string()
+                            }
+                            else {
+                                "thumbs down".to_string()
+                            }
+                        },
+                        _ => "pick".to_string(),
+                    }
+                },
+                _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
+            };
         } else {
-            let mut cfg = String::from(r#"{"state":true}"#);
-            if let Ok(mut conn) = cache.get_async_connection().await {
-                cfg = conn
-                    .get::<&str, String>("kdaemon.por.config")
-                    .await
-                    .unwrap_or_else(|_| "{}".into());
-            }
-            Html(POR_TEMP.replace("{{ getJson }}", &cfg)).into_response()
+            dbg!(&msg);
         }
+
+        get_result_emoji("PoR service", &resp).await.into_response()
+    } else {
+        let mut cfg = String::from(r#"{"state":true}"#);
+        if let Ok(mut conn) = cache.get_async_connection().await {
+            cfg = conn
+                .get::<&str, String>("kdaemon.por.config")
+                .await
+                .unwrap_or_else(|_| "{}".into());
+        }
+        Html(POR_TEMP.replace("{{ getJson }}", &cfg)).into_response()
     }
 }
 

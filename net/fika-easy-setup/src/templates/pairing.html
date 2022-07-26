@@ -1,152 +1,87 @@
 <!DOCTYPE html>
 <html itemscope itemtype="https://schema.org/Product">
-  <head>
     <title>QR Code - OTP Pairing</title>
-
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
-
-    <!--<style>
-      @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-      @media print {
-        #qrcontrols *,
-        #form * {
-          display: none;
-        }
-      }
-
-      body,
-      video,
-      button {
-        max-width: 840px;
-        margin: auto;
-        font-family: 'Share Tech Mono', monospace;
-        font-size: x-large;
-        line-height: 1.5;
-        height: auto;
-      }
-
-      body {
-        padding: 5px;
-      }
-
-      video {
-        max-width: 100%;
-      }
-
-      #qrcontrols,
-      #qrcontrols button {
-        text-align: center;
-        font-size: normal;
-        line-height: 1;
-      }
-
-      #qr {
-        text-align: center;
-      }
-
-      #printarea #qrcontrols {
-        display: none;
-      }
-
-      @import url('https://www.w3schools.com/w3css/4/w3.css');
-
-    </style>-->
-  </head>
-  <body class="w3-blue-gray">
-      <div id="content" class="w3-auto" style="width:50%;">
-          <div id="warning" class="w3-panel w3-green w3-display-container" style="display:none">
-              <span onclick="this.parentElement.style.display='none'"
-                  class="w3-button w3-display-topright">X</span>
-              <p>This device has been paired by {{ ownerId }} ID.</p>
-              <p>Account transfer only between users via APP.</p>
-
-          </div>
-          <div class="w3-container w3-card w3-indigo w3-margin-top">
-              <h2>Device Pairing</h2>
-          </div>
-          <form id="pairing" class="w3-container w3-card-4 w3-dark-gray w3-center">
-              <div class="w3-center w3-margin">
-                  <div id="qr" class="w3-center">{{ content }}</div>
-                  <div class="w3-panel w3-pink">
-                      <h3>{{ routerId }} </h3>
-                  </div>
-                  <div class="w3-panel w3-orange">
-                      <h3>{{ otp }} </h3>
-                  </div>
-              </div>
-
-              <!--<div class="w3-container w3-margin-top">
-                  <h2 class="w3-left">Apply OTP</h2>
-                  <div class="w3-container w3-margin-top w3-center">
-                      <input id="otp0" class="w3-input w3-block w3-center" placeholder="OTP" type="text" maxlength="6" size="6">
-                  </div>
-                  <div class="w3-container w3-margin-top w3-center">
-                  <button class="w3-button w3-section w3-blue w3-ripple w3-padding w3-block" id="submit">Send</button>
-                  </div>
-              </div>-->
-          </form>
-      </div>
-
-    <script
-      src="https://code.jquery.com/jquery-3.6.0.min.js"
-      integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
-      crossorigin="anonymous"
-    ></script>
-
-    <script>
-        var getJson = {{ getJson }};
-
-      $(document).ready(function () {
-          if (getJson["paired"] == true) {
-                      $("#pairing").hide();
-                      $("#warning").show();
-          }
-        $('#print').on('click', function (event) {
-          window.print();
-        });
-
-        $('#submit').on('click', function (event) {
-          event.preventDefault();
-
-          $('#qr').html(
-            '<img src="https://via.placeholder.com/360/fff/000/?text=Loading..." height="360" width="360" />'
-          );
-          $('#qrcontrols').hide();
-
-          /* ref: http://www.jysblog.com/coding/web/js-%E5%88%A9%E7%94%A8ajax%E7%99%BC%E5%87%BApost%E8%AB%8B%E6%B1%82%EF%BC%8C%E4%B8%A6%E4%BD%BF%E7%94%A8json%E5%85%A7%E5%AE%B9%E6%A0%BC%E5%BC%8F/ */
-          var dataJSON = {};
-          dataJSON["otp"] = $('#otp0').val() /*+ $('#otp1').val() + $('#otp2').val()
-                    + $('#otp3').val() + $('#otp4').val + $('#otp5').val()*/;
-
-          $.ajax({
-            type: 'POST',
-            url: '/pairing',
-            dataType: "json",
-            contentType: "application/json;charset=utf-8",
-            data: JSON.stringify(dataJSON),
-            success: function (resp) {
-              $('#content').html(resp);
-            },
-            error: function () {
-              $('#qr').html(
-                '<img src="https://via.placeholder.com/360/fff/f00/?text=ERROR! Try again..." height="360" width="360" />'
-              );
-              $('#qrcontrols').hide();
-            },
-            dataType: 'html',
-          });
-        });
-
-        if ($('#qr').html() !== '') {
-          $('#qrcontrols').show();
-        }
-      });
-    </script>
-  </body>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.2/css/all.min.css">
+    <body class="w3-blue-gray">
+        <div class="w3-bar w3-teal">
+            <a href="https://koralden.com" class="w3-bar-item w3-hover-green">Koralden</a>
+            <a href="/about" class="w3-bar-item w3-hover-green w3-right">About</a>
+            <a href="/terms" class="w3-bar-item w3-hover-green w3-right">Terms</a>
+            <a href="/privacy" class="w3-bar-item w3-hover-green w3-right">Privacy</a>
+        </div>
+        <div class="w3-row">
+            <div class="w3-third w3-auto w3-margin-top w3-xlarge w3-black">
+                <a href="/setup/easy" class="w3-button w3-block w3-left-align"><i class="fa fa-network-wired"></i> Network</a>
+                <a href="/pairing" class="w3-button w3-block w3-left-align"><i class="fa fa-user-gear"></i> Pairing</a>
+                <a href="/por/wifi" class="w3-button w3-block w3-left-align"><i class="fa fa-wifi"></i> PoR</a>
+                <a href="/logout" class="w3-button w3-block w3-left-align"><i class="fa fa-person-running"></i> Logout</a>
+            </div>
+            <div class="w3-rest w3-container">
+                <div id="warning" class="w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>This device has been paired by {{ ownerId }} ID.</p>
+                    <p>Account transfer only between users via APP.</p>
+                </div>
+                <div class="w3-container w3-card w3-indigo w3-margin-top">
+                    <h2>Device Pairing</h2>
+                </div>
+                <form id="pairing" class="w3-container w3-card-4 w3-dark-gray w3-center">
+                    <div class="w3-center w3-margin" id="browserOnly">
+                        <div id="qr" class="w3-center">{{ content }}</div>
+                        <div class="w3-panel w3-pink">
+                            <h3 id="gwId">{{ routerId }} </h3>
+                        </div>
+                        <div class="w3-panel w3-orange">
+                            <h3 id="otpRaw">{{ otp }} </h3>
+                        </div>
+                    </div>
+                    <div class="w3-panel" id="kappOnly">
+                        <button class="w3-button w3-section w3-block w3-blue w3-ripple w3-padding" id="submit">Pair It</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script
+            src="https://code.jquery.com/jquery-3.6.0.min.js"
+            integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+            crossorigin="anonymous"
+                ></script>
+        <script>
+            var getJson = {{ getJson }};
+            /*function openSidebar() {
+                            document.getElementById("mySidebar").style.display = "block";
+                        }
+            function closeSidebar() {
+                            document.getElementById("mySidebar").style.display = "none";
+                        }*/
+                $(document).ready(function () {
+                                /*closeSidebar*/
+                                    if (getJson["paired"] == true) {
+                                                    $("#pairing").hide();
+                                                    $("#warning").show();
+                                                }
+                                $('#submit').on('click', function (event) {
+                                                event.preventDefault();
+                                                AppFunction.device_otp($('#gwId').text(), $('#otpRaw').text());
+                                            });
+                                $('#kappOnly').hide();
+                                if (typeof AppFunction.check_is_app === 'function') {
+                                                if (AppFunction.check_is_app() === 1) {
+                                                                $('#browserOnly').hide();
+                                                                $('#kappOnly').show();
+                                                            }
+                                            }
+                                if ($('#qr').html() !== '') {
+                                                $('#qrcontrols').show();
+                                            }
+                            });
+        </script>
+    </body>
 </html>
