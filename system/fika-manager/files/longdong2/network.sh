@@ -134,10 +134,10 @@ EOI
 }
 
 network_apply() {
+    echo 0 >/etc/firstLogin
+
     /etc/init.d/firewall reload
     /etc/init.d/network reload
-    /etc/init.d/dnsmasq reload
-
-    echo 0 >/etc/firstLogin
+    /etc/init.d/dnsmasq restart
     /etc/init.d/uhttpd restart
 }
