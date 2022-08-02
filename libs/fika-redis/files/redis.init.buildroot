@@ -8,10 +8,16 @@ STOP=50
 
 start() {
 	printf "Starting fika-redis: "
+        conf=/etc/fika-redis.conf
+        dir=$(awk '/^dir/ {print $2}' $conf)
+        prefix=$(awk -F\" '/^appendfilename/ {print $2}' $conf)
+        aofdir=$(awk -F\" '/^appenddirname/ {print $2}' $conf)
+        manifest=$dir$aofdir/$prefix.manifest
+        sysctl vm.overcommit_memory=1
 	umask 077
-        [ -d /var/lib/redis ] || mkdir -p /var/lib/redis
-        [ -e /var/lib/redis/appendonly.aof ] \
-            && /usr/bin/redis-check-aof --fix /var/lib/redis/appendonly.aof
+        [ -d $dir ] || mkdir -p $dir
+        [ -e $manifest ] \
+            && /usr/bin/redis-check-aof --fix $manifest
 	start-stop-daemon -S -q -c root:root -b \
 		-x /usr/bin/redis-server -- /etc/fika-redis.conf
 	[ $? = 0 ] && echo "OK" || echo "FAIL"

@@ -8,8 +8,19 @@ START=97
 STOP=10
 
 start() {
-	printf "Starting fika-manager-recovery: "
-        /usr/bin/fika-manager-recovery -l info -c /etc/fika_manager/factory.toml
+	printf "Checking REDIS: "
+        tries=1
+        while sleep 1; do
+            [ "PONG" = "$(/usr/bin/redis-cli PING)" ] && echo "ready to go" && break
+            [ $tries -eq 10 ] && echo "timeout(10s) FAIL" && exit 127
+            tries=$(expr $tries + 1)
+            printf "."
+        done
+        if [ $(redis-cli --raw EXISTS "kap.core.done") -eq 0 ]; then
+            printf "Starting fika-manager-recovery: "
+            umask 077
+            /usr/bin/fika-manager-recovery -l info -c /etc/fika_manager/factory.toml
+        fi
 	printf "Starting fika-manager: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \
