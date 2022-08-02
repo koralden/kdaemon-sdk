@@ -4,25 +4,6 @@ DEBUG=0
 
 source /etc/fika_manager/hcs_honest_challenge.sh
 
-get_boss_ap_token() {
-    local atoken=$1 && shift
-    local url=$1 && shift
-    local json
-
-    json=$(curl -s -H "ACCESSTOKEN:${atoken}" -X GET ${url})
-    #my_log debug "curl ap_token $json"
-
-    code=$(echo $json | jq -r .code)
-    if [ "X$code" = "X200" ]; then
-        apToken=$(echo $json | jq -r .ap_token)
-        #my_log debug "apToken as $apToken"
-        echo "$apToken"
-    #else
-        #my_log error "NO B/OSS ACCESSTOKEN-AP in ${url}, force exit" 
-        #exit 127
-    fi
-}
-
 post_challenger() {
     local response challenger hashed json code
     local cid
