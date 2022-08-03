@@ -8,8 +8,10 @@ START=97
 STOP=10
 
 start() {
-	#. /lib/functions/network.sh
-	#network_get_ipaddrs myLanIp kguest
+	. /lib/functions/network.sh
+	network_get_ipaddrs guestIp kguest
+        grep -q "^fasremoteip $guestIp" /etc/opennds/longdong.conf || \
+            sed "s,^fasremoteip.*$,fasremoteip $guestIp," /etc/opennds/longdong.conf
 	printf "Starting fika-opennds: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \

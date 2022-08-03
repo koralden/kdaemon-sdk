@@ -7,3 +7,5 @@ pub use kap_boss::BossMenu;
 
 pub mod kap_core;
 pub use kap_core::CoreMenu;
+
+pub mod fas;

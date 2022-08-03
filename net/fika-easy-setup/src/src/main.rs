@@ -14,8 +14,8 @@ use axum::{
     async_trait,
     extract::Form,
     extract::{
-        rejection::TypedHeaderRejectionReason, Extension, FromRequest, Query, RequestParts,
-        TypedHeader, ConnectInfo, Path,
+        rejection::TypedHeaderRejectionReason, ConnectInfo, Extension, FromRequest, Path, Query,
+        RequestParts, TypedHeader,
     },
     http::{header::SET_COOKIE, HeaderMap, StatusCode},
     response::Html,
@@ -23,8 +23,8 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use axum_server::tls_rustls::RustlsConfig;
 use axum_macros::debug_handler;
+use axum_server::tls_rustls::RustlsConfig;
 use chrono::prelude::*;
 use clap::Parser;
 use futures_util::StreamExt as _;
@@ -39,9 +39,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
-use tracing::{debug, info/*, error*/};
+use tracing::{debug, info /*, error*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use fika_easy_setup::fas;
 use fika_easy_setup::kap_boss::BossMenu;
 use fika_easy_setup::kap_core::CoreMenu;
 
@@ -99,6 +100,13 @@ struct Opt {
     otp_path: Option<String>,
     #[clap(long = "mac-address", default_value = "A1:A2:33:44:55:66")]
     mac_address: String,
+
+    #[clap(long = "fas-port", default_value = "8887")]
+    fas_port: u16,
+    #[clap(long = "fas-key", default_value = "5290676855")]
+    fas_key: String,
+    #[clap(long = "auth-dir", default_value = "opennds_auth")]
+    auth_dir: String,
 }
 
 static COOKIE_NAME: &str = "SESSION";
@@ -126,13 +134,25 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let fas = tokio::spawn(fas::fas_service(
+        opt.public_addr.clone(),
+        opt.fas_port,
+        opt.redis_addr.clone(),
+        opt.fas_key.clone(),
+        opt.auth_dir.clone(),
+    ));
+
     let http = tokio::spawn(public_service(
-            opt.public_addr.clone(), opt.public_port,
-            opt.redis_addr.clone(), opt.wallet_addr.clone(),
-            opt.certificate.clone(), opt.private_key.clone()));
+        opt.public_addr.clone(),
+        opt.public_port,
+        opt.redis_addr.clone(),
+        opt.wallet_addr.clone(),
+        opt.certificate.clone(),
+        opt.private_key.clone(),
+    ));
     let https = tokio::spawn(private_service(opt));
 
-    let _ = tokio::join!(https, http);
+    let _ = tokio::join!(https, http, fas);
 }
 
 async fn private_service(mut opt: Opt) {
@@ -159,13 +179,17 @@ async fn private_service(mut opt: Opt) {
             core.map_or(None, |c| Some(c.wallet_address))
         }, |v| Some(v));*/
 
-        let value = db_conn.get::<&str, String>("kap.core").await
+        let value = db_conn
+            .get::<&str, String>("kap.core")
+            .await
             .or(Err("kap.core not found"))
             .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
         if let Ok(value) = value {
             wallet = wallet.or(Some(value.wallet_address));
         }
-        let value = db_conn.get::<&str, String>("kap.boss").await
+        let value = db_conn
+            .get::<&str, String>("kap.boss")
+            .await
             .or(Err("kap.boss not found"))
             .and_then(|s| serde_json::from_str::<BossMenu>(&s).or(Err("json convert fail")));
         if let Ok(value) = value {
@@ -180,13 +204,14 @@ async fn private_service(mut opt: Opt) {
     }
 
     let otp = ServerCtx::new(
-        api_url, otp_path,
-        access_token, access_token_ap,
+        api_url,
+        otp_path,
+        access_token,
+        access_token_ap,
         wallet,
-
         opt.client_username.take(),
         opt.client_password.take(),
-        );
+    );
 
     let app = Router::new()
         .route("/", get(index))
@@ -212,7 +237,7 @@ async fn private_service(mut opt: Opt) {
         ))*/;
 
     let addr = SocketAddr::from((
-            IpAddr::from_str(opt.private_addr.as_str()).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)), 
+        IpAddr::from_str(opt.private_addr.as_str()).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)),
         opt.private_port,
     ));
     tracing::info!("listening on {} for private", addr);
@@ -227,15 +252,21 @@ async fn private_service(mut opt: Opt) {
         .unwrap();
 }
 
-async fn public_service(public_addr: String, public_port: u16,
-    redis_addr: String, mut wallet: Option<String>,
-    cert: String, private_key: String,
+async fn public_service(
+    public_addr: String,
+    public_port: u16,
+    redis_addr: String,
+    mut wallet: Option<String>,
+    cert: String,
+    private_key: String,
 ) {
     let redis_addr = format!("redis://{}/", redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
 
     if let Ok(mut db_conn) = cache.get_async_connection().await {
-        let value = db_conn.get::<&str, String>("kap.core").await
+        let value = db_conn
+            .get::<&str, String>("kap.core")
+            .await
             .or(Err("kap.core not found"))
             .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
         if let Ok(value) = value {
@@ -248,17 +279,14 @@ async fn public_service(public_addr: String, public_port: u16,
             API_PATH_HONEST_CHALLENGE,
             get(honest_challenge).post(update_honest_challenge),
         )
-        .route(
-            API_PATH_OPENNDS_FAS,
-            get(public_opennds_fas),
-        )
+        .route(API_PATH_OPENNDS_FAS, get(public_opennds_fas))
         .layer(Extension(cache))
         .layer(Extension(wallet.unwrap()))
         .into_make_service_with_connect_info::<SocketAddr>();
-        
+
     let addr = SocketAddr::from((
-            IpAddr::from_str(&public_addr).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)), 
-            public_port,
+        IpAddr::from_str(&public_addr).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+        public_port,
     ));
     tracing::info!("listening on {} for public", addr);
 
@@ -354,7 +382,7 @@ async fn do_simple_auth(
     let mut headers = HeaderMap::new();
 
     if server_ctx.do_login(&login.name, &login.password).is_err() {
-        return (headers, Redirect::to(API_PATH_AUTH_SIMPLE))
+        return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
     }
 
     // Create a new session filled with user data
@@ -412,7 +440,7 @@ async fn show_network_setup(
 
     let mut cfg = String::from(
         r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#,
-        );
+    );
     if let Ok(mut conn) = cache.get_async_connection().await {
         cfg = conn
             .get::<&str, String>("kdaemon.easy.setup")
@@ -576,22 +604,25 @@ struct ServerCtx {
 }
 
 impl ServerCtx {
-    fn new(api_url: Option<String>, otp_path: Option<String>,
-           access_token: Option<String>, access_token_ap: Option<String>,
-           wallet: Option<String>,
-           login_name: Option<String>, login_password: Option<String>,
+    fn new(
+        api_url: Option<String>,
+        otp_path: Option<String>,
+        access_token: Option<String>,
+        access_token_ap: Option<String>,
+        wallet: Option<String>,
+        login_name: Option<String>,
+        login_password: Option<String>,
     ) -> Self {
         ServerCtx {
-            api_url:
-                api_url.map_or("https://oss-api.k36588.info".to_owned(), |v| v),
-            access_token:
-                access_token.map_or("ce18d7a0940719a00da82448b38c90b2".to_owned(), |v| v),
-            access_token_ap:
-                access_token_ap.map_or("02ec7a905b70689d9b30c6118fd1e62f".to_owned(), |v| v),
-            otp_path:
-                otp_path.map_or("v0/ap/otp".to_owned(), |v| v),
-            wallet:
-                wallet.map_or("5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT".to_owned(), |v| v),
+            api_url: api_url.map_or("https://oss-api.k36588.info".to_owned(), |v| v),
+            access_token: access_token.map_or("ce18d7a0940719a00da82448b38c90b2".to_owned(), |v| v),
+            access_token_ap: access_token_ap
+                .map_or("02ec7a905b70689d9b30c6118fd1e62f".to_owned(), |v| v),
+            otp_path: otp_path.map_or("v0/ap/otp".to_owned(), |v| v),
+            wallet: wallet.map_or(
+                "5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT".to_owned(),
+                |v| v,
+            ),
 
             login_name,
             login_password,
@@ -612,7 +643,8 @@ impl ServerCtx {
             invalid_time = internal.invalid_time;
         }*/
 
-        /*if Utc::now() >= invalid_time */{
+        /*if Utc::now() >= invalid_time */
+        {
             let url = format!("{}/{}", &self.api_url, &self.otp_path);
             let client = reqwest::Client::new();
             let data = client
@@ -620,7 +652,7 @@ impl ServerCtx {
                 //.bearer_auth(token.access_token().secret())
                 .header("ACCESSTOKEN", &self.access_token)
                 .header("ACCESSTOKEN-AP", &self.access_token_ap)
-                .query(&[("ap_wallet", &self.wallet)/*, ("ap_mac", &mac)*/])
+                .query(&[("ap_wallet", &self.wallet) /*, ("ap_mac", &mac)*/])
                 .send()
                 .await?
                 .json::<KApOtp>()
@@ -637,11 +669,11 @@ impl ServerCtx {
 
                 Ok(data.otp)
             }
-        }/* else {
-            let internal = self.internal.lock().unwrap();
+        } /* else {
+              let internal = self.internal.lock().unwrap();
 
-            Ok(internal.otp.clone())
-        }*/
+              Ok(internal.otp.clone())
+          }*/
     }
 
     fn as_app_query(&self, otp: Option<String>) -> Result<KAppOtp> {
@@ -698,7 +730,6 @@ impl ServerCtx {
                     }
                 }
             }
-
         }
         Ok(())
     }
@@ -727,7 +758,6 @@ impl ServerCtx {
         }
         Ok(())
     }
-
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -765,20 +795,23 @@ async fn show_pairing(
 
     /* TODO implement check paired flow */
     /*let paired = if server_ctx.wallet != Some(opt.wallet_addr) {
-      paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, server_ctx.wallet.as_ref().unwrap());
-      } else {
-      paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, server_ctx.wallet.as_ref().unwrap());
-      };*/
-    let paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, &app_otp.ap_wallet);
+    paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, server_ctx.wallet.as_ref().unwrap());
+    } else {
+    paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, server_ctx.wallet.as_ref().unwrap());
+    };*/
+    let paired = format!(
+        r#"{{"ownerId": "{}", "paired": false}}"#,
+        &app_otp.ap_wallet
+    );
 
     Html(
         PAIRING_TEMP
-        .replace("{{ content }}", &String::from_utf8_lossy(&image))
-        .replace("{{ getJson }}", &paired)
-        .replace("{{ otp }}", &app_otp.otp)
-        .replace("{{ routerId }}", &app_otp.ap_wallet),
-        )
-        .into_response()
+            .replace("{{ content }}", &String::from_utf8_lossy(&image))
+            .replace("{{ getJson }}", &paired)
+            .replace("{{ otp }}", &app_otp.otp)
+            .replace("{{ routerId }}", &app_otp.ap_wallet),
+    )
+    .into_response()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -889,19 +922,31 @@ impl BossHcsPair {
         Err(anyhow::anyhow!("HCS task not found"))
     }
 
-    async fn new_challenge(&self, conn: &mut redis::aio::Connection, challenger_id: &str) -> Result<()> {
+    async fn new_challenge(
+        &self,
+        conn: &mut redis::aio::Connection,
+        challenger_id: &str,
+    ) -> Result<()> {
         let key = format!("boss.hcs.challengers.{}", self.hcs_sid);
         if let Ok(exist) = conn.hexists::<&str, &str, bool>(&key, challenger_id).await {
             if exist {
-                return Err(anyhow::anyhow!("{} have challenged in {} session",
-                                           challenger_id, self.hcs_sid));
+                return Err(anyhow::anyhow!(
+                    "{} have challenged in {} session",
+                    challenger_id,
+                    self.hcs_sid
+                ));
             }
         }
 
         return Ok(());
     }
 
-    async fn push_server(&self, conn: &mut redis::aio::Connection, challenger_id: &str, hashed: &str) -> Result<()> {
+    async fn push_server(
+        &self,
+        conn: &mut redis::aio::Connection,
+        challenger_id: &str,
+        hashed: &str,
+    ) -> Result<()> {
         let value = serde_json::json!({
             "hashed": hashed,
             "sent": false
@@ -912,9 +957,7 @@ impl BossHcsPair {
             .await?;
 
         let notify = "honest.challenger";
-        let _ = conn
-            .publish::<&str, &str, _>(notify, challenger_id)
-            .await?;
+        let _ = conn.publish::<&str, &str, _>(notify, challenger_id).await?;
         Ok(())
     }
 }
@@ -936,18 +979,15 @@ async fn honest_challenge(
     if let Ok(mut conn) = cache.get_async_connection().await {
         match BossHcsPair::get(&mut conn).await {
             Ok(hcs) => {
-                if hcs.new_challenge(&mut conn, &challenger_id)
-                    .await.is_ok()
-                    {
-                        challenge.token = Some(hcs.hcs_token);
-                        challenge.gw_id = Some(wallet.clone());
-                        challenge.code = 200;
-                    }
-                else {
+                if hcs.new_challenge(&mut conn, &challenger_id).await.is_ok() {
+                    challenge.token = Some(hcs.hcs_token);
+                    challenge.gw_id = Some(wallet.clone());
+                    challenge.code = 200;
+                } else {
                     debug!("{} has challenged in this task", &challenger_id);
                     challenge.code = 406;
                 }
-            },
+            }
             Err(_) => {
                 debug!("No challenge task");
                 challenge.code = 404;
@@ -978,11 +1018,11 @@ async fn update_honest_challenge(
     if let Ok(mut conn) = cache.get_async_connection().await {
         match BossHcsPair::get(&mut conn).await {
             Ok(hcs) => {
-                if hcs.new_challenge(&mut conn, &challenger_id)
-                    .await.is_ok()
-                {
-                    if hcs.push_server(&mut conn, &challenger_id, &hc_request.hashed)
-                        .await.is_ok()
+                if hcs.new_challenge(&mut conn, &challenger_id).await.is_ok() {
+                    if hcs
+                        .push_server(&mut conn, &challenger_id, &hc_request.hashed)
+                        .await
+                        .is_ok()
                     {
                         resp.code = 200;
                     } else {
@@ -993,7 +1033,7 @@ async fn update_honest_challenge(
                     debug!("{} has challenged in this task", &challenger_id);
                     resp.code = 406;
                 }
-            },
+            }
             Err(_) => {
                 debug!("No challenge task");
                 resp.code = 404;
@@ -1133,12 +1173,12 @@ async fn por_wifi(
             match conn
                 .set::<&str, &str, String>("kdaemon.por.config", &msg)
                 .await
-                {
-                    Ok(_) => {}
-                    Err(_e) => {
-                        debug!("db set kdaemon.por.config {}", &msg);
-                    }
+            {
+                Ok(_) => {}
+                Err(_e) => {
+                    debug!("db set kdaemon.por.config {}", &msg);
                 }
+            }
 
             conn.publish::<&str, &str, usize>("kdaemon.por.config", &msg)
                 .await
@@ -1191,4 +1231,3 @@ async fn public_opennds_fas(
 
     Html(FAS_TEMP).into_response()
 }
-

@@ -504,6 +504,7 @@ dependencies = [
  "axum-extra",
  "axum-macros",
  "axum-server",
+ "base64",
  "chrono",
  "clap",
  "emojis",
@@ -520,9 +521,12 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_qs",
+ "sha2 0.10.2",
  "shadow",
  "thiserror",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1430,6 +1434,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_qs"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
+dependencies = [
+ "percent-encoding",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1766,6 +1781,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

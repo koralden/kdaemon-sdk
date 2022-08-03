@@ -14,16 +14,19 @@ FIKA_OPENNDS_LICENSE_FILES = COPYING
 FIKA_OPENNDS_INSTALL_TARGET = YES
 FIKA_OPENNDS_DEPENDENCIES = libmicrohttpd
 
-#define MANUAL_PATCH
-#	@$(call MESSAGE,"Manual Patching")
-#	for D in $(FIKA_OPENNDS_PKGDIR); do \
-#	  if test -d $${D}; then \
-#	      $(APPLY_PATCHES) $(@D) $${D} \*.patch \*.patch.$(ARCH) || exit 1; \
-#	  fi; \
-#	done;
-#endef
-#
-#FIKA_OPENNDS_POST_RSYNC_HOOKS += MANUAL_PATCH
+define MANUAL_PATCH
+	if ! test -e $(@D)/.MANUAL_PATCH; then \
+		@$(call MESSAGE,"Manual Patching"); \
+		for D in $(FIKA_OPENNDS_PKGDIR); do \
+		  if test -d $${D}; then \
+		      $(APPLY_PATCHES) $(@D) $${D} \*.patch \*.patch.$(ARCH) || exit 1; \
+		  fi; \
+		done; \
+		touch $(@D)/.MANUAL_PATCH; \
+	fi
+endef
+
+FIKA_OPENNDS_POST_RSYNC_HOOKS += MANUAL_PATCH
 
 define FIKA_OPENNDS_BUILD_CMDS
 	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) all

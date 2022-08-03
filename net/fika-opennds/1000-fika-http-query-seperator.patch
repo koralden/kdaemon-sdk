@@ -1,0 +1,20 @@
+diff --git a/src/common.h b/src/common.h
+index b5d454b..8592219 100644
+--- a/src/common.h
++++ b/src/common.h
+@@ -43,11 +43,14 @@
+ #define QUERYMAXLEN 8192
+ 
+ /* Separator for Preauth and Encrypted query string */
+-#define QUERYSEPARATOR ", "
++//yellow #define QUERYSEPARATOR ", "
+ 
+ /* Separator for html query string */
+ #define HTMLQUERYSEPARATOR "&"
+ 
++//yellow, change this seperator as same as http-query-seperator
++#define QUERYSEPARATOR HTMLQUERYSEPARATOR
++
+ // Define a custom separator for custom parameter name/value pairs ie urlencoded "="
+ #define CUSTOM_SEPARATOR "%3d"
+ #define FORMAT_SPECIFIER "%s"
