@@ -7,6 +7,8 @@
 #include "list.h"
 #include "config.h"
 
+#define VERSION "0.0.1"
+
 //#define DEBUG   1
 #ifdef DEBUG
 #define dprintf(fmt, ...) do {          \
@@ -38,6 +40,7 @@ static int argv_parse(int argc, char **argv)
             {"endpoint",required_argument, 0, 'e'},
             {"endport", required_argument, 0, 'm'},
             {"help",    no_argument,       0, 'h'},
+            {"version", no_argument,       0, 'v'},
             {0,         0,                 0,  0 }
         };
 
@@ -78,7 +81,10 @@ static int argv_parse(int argc, char **argv)
             case 'm':
                 config_options.aws_port = atoi(optarg);
                 break;
-
+            case 'v':
+                printf("%s %s\n", argv[0], VERSION);
+                exit(0);
+                break;
             case '?':
             case 'h':
             default:
@@ -89,7 +95,8 @@ static int argv_parse(int argc, char **argv)
                 printf("\t-c, --key\n\t\tprivate-key path\n");
                 printf("\t-a, --ca\n\t\tcloud Root-CA path\n");
                 printf("\t-t, --thing\n\t\tcloud thing name\n");
-                return -1;
+                printf("\t-v, --version\n\t\tshow version\n");
+                exit(1);
                 break;
         }
     }

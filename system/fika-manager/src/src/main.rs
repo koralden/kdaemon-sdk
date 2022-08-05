@@ -21,7 +21,8 @@ use std::path::PathBuf;
 #[derive(Parser, Debug, Clone)]
 #[clap(
     name = "fika-manager",
-    about = "FIKA manager to interactive with platform"
+    about = "FIKA manager to interactive with platform",
+    version = "0.0.1",
 )]
 struct Opt {
     #[clap(

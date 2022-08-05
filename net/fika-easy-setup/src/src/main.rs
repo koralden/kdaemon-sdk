@@ -49,7 +49,8 @@ use fika_easy_setup::kap_core::CoreMenu;
 #[derive(Parser, Debug, Clone)]
 #[clap(
     name = "fika-easy-setup",
-    about = "FIKA easy setup server for pairing, challenge and  easy setup"
+    about = "FIKA easy setup server for pairing, challenge and  easy setup",
+    version = "0.0.1",
 )]
 struct Opt {
     /// set the listen addr
