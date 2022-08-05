@@ -85,10 +85,10 @@ struct Opt {
     #[clap(long = "static-dir", default_value = "../templates")]
     static_dir: String,
 
-    #[clap(long = "certificate", default_value = "certs/cert.pem")]
-    certificate: String,
-    #[clap(long = "private-key", default_value = "certs/key.pem")]
-    private_key: String,
+    #[clap(long = "certificate")]
+    certificate: Option<String>,
+    #[clap(long = "private-key")]
+    private_key: Option<String>,
 
     #[clap(long = "api-url")]
     api_url: Option<String>,
@@ -240,16 +240,28 @@ async fn private_service(mut opt: Opt) {
         IpAddr::from_str(opt.private_addr.as_str()).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)),
         opt.private_port,
     ));
-    tracing::info!("listening on {} for private", addr);
 
-    let config = RustlsConfig::from_pem_file(&opt.certificate, &opt.private_key)
-        .await
-        .unwrap();
+    match (opt.certificate, opt.private_key) {
+        (Some(ref cert), Some(ref pkey)) => {
+            let config = RustlsConfig::from_pem_file(cert, pkey)
+                .await
+                .unwrap();
 
-    axum_server::bind_rustls(addr, config)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+            tracing::info!("listening on https://{} for private", addr);
+
+            axum_server::bind_rustls(addr, config)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        },
+        (_, _) => {
+            tracing::info!("listening on http://{} for private", addr);
+            axum::Server::bind(&addr)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        },
+    }
 }
 
 async fn public_service(
@@ -257,8 +269,8 @@ async fn public_service(
     public_port: u16,
     redis_addr: String,
     mut wallet: Option<String>,
-    cert: String,
-    private_key: String,
+    cert: Option<String>,
+    private_key: Option<String>,
 ) {
     let redis_addr = format!("redis://{}/", redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
@@ -288,16 +300,29 @@ async fn public_service(
         IpAddr::from_str(&public_addr).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)),
         public_port,
     ));
-    tracing::info!("listening on {} for public", addr);
 
-    let config = RustlsConfig::from_pem_file(cert, private_key)
-        .await
-        .unwrap();
+    match (cert, private_key) {
+        (Some(ref cert), Some(ref pkey)) => {
+            let config = RustlsConfig::from_pem_file(cert, pkey)
+                .await
+                .unwrap();
 
-    axum_server::bind_rustls(addr, config)
-        .serve(app)
-        .await
-        .unwrap();
+            tracing::info!("listening on https://{} for public", addr);
+
+            axum_server::bind_rustls(addr, config)
+                .serve(app)
+                .await
+                .unwrap();
+        },
+        (_, _) => {
+            tracing::info!("listening on http://{} for public", addr);
+
+            axum::Server::bind(&addr)
+                .serve(app)
+                .await
+                .unwrap();
+        },
+    }
 }
 
 async fn logout(
