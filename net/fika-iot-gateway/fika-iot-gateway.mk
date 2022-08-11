@@ -18,7 +18,7 @@ FIKA_IOT_GATEWAY_DEPENDENCIES = openssl libuv hiredis libyaml aws-iot-device-sdk
 FIKA_IOT_GATEWAY_CONF_OPTS = -DSDK_DIR=$(STAGING_DIR)/usr
 FIKA_IOT_GATEWAY_SUPPORTS_IN_SOURCE_BUILD = NO
 
-define MANUAL_PATCH
+define FIKA_IOT_GATEWAY_MANUAL_PATCH
 	if ! test -e $(@D)/.MANUAL_PATCH; then \
 		@$(call MESSAGE,"Manual Patching"); \
 		for D in $(FIKA_IOT_GATEWAY_PKGDIR); do \
@@ -30,7 +30,7 @@ define MANUAL_PATCH
 	fi
 endef
 
-FIKA_IOT_GATEWAY_POST_RSYNC_HOOKS += MANUAL_PATCH
+FIKA_IOT_GATEWAY_POST_RSYNC_HOOKS += FIKA_IOT_GATEWAY_MANUAL_PATCH
 
 FIKA_IOT_GATEWAY_MY_DIR=package/longdong/net/fika-iot-gateway/files
 FIKA_IOT_GATEWAY_MY_FILES=fika_iot_gateway.yaml MVP_000001-certificate.pem.crt MVP_000001-private.pem.key AmazonRootCA1.pem AmazonRootCA3.pem
