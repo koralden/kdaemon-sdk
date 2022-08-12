@@ -61,5 +61,6 @@ db_set = true
 
 [[task]]
 topic = "boss.token"
+start_at = {secs = 9, nanos = 0 }
 period = {secs = 3600, nanos = 0 }
 path = "/etc/fika_manager/boss_token.sh"

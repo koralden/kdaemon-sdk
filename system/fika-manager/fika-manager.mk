@@ -40,6 +40,8 @@ define FIKA_MANAGER_INSTALL_MISC
 	for i in $(FIKA_MANAGER_MY_SCRIPT); do \
 		$(INSTALL) -m 0755 -D $(FIKA_MANAGER_MY_DIR)/$${i} $(TARGET_DIR)/etc/fika_manager/$${i}; \
 	done
+	$(INSTALL) -d $(TARGET_DIR)/etc/hotplug.d/iface
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/97-fika-manager.hotplug $(TARGET_DIR)/$(TARGET_DIR)/etc/hotplug.d/iface/97-fika-manager
 endef
 
 FIKA_MANAGER_POST_INSTALL_TARGET_HOOKS += FIKA_MANAGER_INSTALL_MISC

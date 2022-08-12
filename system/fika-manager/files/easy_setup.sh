@@ -23,6 +23,10 @@
 msg=""
 code=404
 
+system_cb() {
+    timezone_fix
+}
+
 account_cb() {
     act="unknown"
     [ $# -ge 1 ] && act=$1 && shift
@@ -138,6 +142,8 @@ get_boss_ap_token() {
 
 main() {
     cfg=$1 && shift
+
+    system_cb
 
     type=$(echo $cfg | jq -r .wan_type)
     if [ "X$type" = "X1" ]; then

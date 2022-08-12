@@ -1,0 +1,9 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+/etc/init.d/fika-manager enabled && [ "$ACTION" = "ifup" ] && {
+    if [ ${INTERFACE} = 'wan' ]; then
+        /etc/init.d/fika-manager restart
+    fi
+}

@@ -10,3 +10,17 @@ account_modify() {
     username="root"
     (echo $password ; sleep 1; echo $password) | passwd $username
 }
+
+timezone_fix() {
+    local timezone
+
+    tz=$(uci get system.@system[-1].timezone)
+    if [ "x$tz" != "xCST-8" ]; then
+        uci batch << EOI
+set system.@system[-1].zonename='Asia/Taipei'
+set system.@system[-1].timezone='CST-8'
+commit system
+EOI
+        /etc/init.d/system reload
+    fi
+}
