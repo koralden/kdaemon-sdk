@@ -13,7 +13,7 @@ my_log() {
     level=$1 && shift
 
     if [ -e /dev/log ]; then
-        logger -s -t hcs-honest-challenge -p ${level} "$@"
+        logger -t hcs-honest-challenge -p ${level} "$@"
     else
         echo "[hcs-honest-challenge][${level}] $@"
     fi
@@ -32,10 +32,7 @@ db_fetch() {
     kapWallet=$(echo $kap_core | jq -r .wallet_address)
     accesstokenAp=$(redis-cli --raw GET kap.boss.ap.token)
 
-    my_log debug "appUrl: $rootUrl"
-    my_log debug "kapWallet: $kapWallet"
-    my_log debug "accesstoken: $accesstoken"
-    my_log debug "accesstokenAp: $accesstokenAp"
+    my_log debug "appUrl: $rootUrl kapWallet: $kapWallet accesstoken: $accesstoken accesstokenAp: $accesstokenAp"
 
     [ -z "$rootUrl" -o -z "$accesstoken" -o -z "$accesstokenAp" -o -z "$kapWallet" ] && \
         my_log error "database rootUrl/accesstoken/accesstokenAp/kapWallet=${rootUrl}/${accesstoken}/${accesstokenAp}/${kapWallet} invalid" && \

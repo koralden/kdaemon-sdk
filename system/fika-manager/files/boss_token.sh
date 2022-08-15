@@ -2,7 +2,7 @@
 
 DEBUG=0
 
-source /etc/fika_manager/hcs_honest_challenge.sh
+. /etc/fika_manager/hcs_honest_challenge.sh
 
 post_challenger() {
     local response challenger hashed json code

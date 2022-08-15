@@ -3,6 +3,11 @@ database = "redis://127.0.0.1:6379"
 version = "0.1.0"
 thirdparty = "longdong2"
 
+[honest]
+ok_cycle = {secs = 13, nanos = 0 }
+fail_cycle = {secs = 301, nanos = 0 }
+path = "/etc/fika_manager/boss_token.sh"
+
 [[subscribe]]
 topic = "kdaemon.easy.setup"
 path = "/etc/fika_manager/easy_setup.sh"
@@ -19,9 +24,9 @@ path = "/etc/fika_manager/captive-portal.sh"
 topic = "nms.shadow.delta.remote-manage"
 path = "/etc/fika_manager/nms_remote_manage.sh"
 
-[[subscribe]]
-topic = "nms.shadow.delta.pairing"
-path = "/etc/fika_manager/cmp_pairing.sh"
+#[[subscribe]]
+#topic = "nms.shadow.delta.pairing"
+#path = "/etc/fika_manager/cmp_pairing.sh"
 
 [[subscribe]]
 topic = "honest.challenger"
@@ -58,9 +63,3 @@ start_at = {secs = 1, nanos = 0 }
 period = {secs = 180, nanos = 0 }
 path = "/etc/fika_manager/system_checking.sh"
 db_set = true
-
-[[task]]
-topic = "boss.token"
-start_at = {secs = 9, nanos = 0 }
-period = {secs = 3600, nanos = 0 }
-path = "/etc/fika_manager/boss_token.sh"

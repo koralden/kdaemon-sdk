@@ -7,7 +7,7 @@ use tokio::fs;
 use tokio::signal;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::time::{self, Duration, Instant};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, warn, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 //use bytes::Bytes;
 use std::iter::repeat_with;
@@ -17,12 +17,13 @@ use process_stream::{Process, ProcessItem, Stream, StreamExt};
 use std::collections::{BTreeMap, HashMap};
 //use std::io;
 use std::path::PathBuf;
+use chrono::prelude::*;
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
     name = "fika-manager",
     about = "FIKA manager to interactive with platform",
-    version = "0.0.1",
+    version = "0.0.2",
 )]
 struct Opt {
     #[clap(
@@ -39,6 +40,7 @@ struct Config {
     core: ConfigCore,
     subscribe: Option<Vec<ConfigSubscribe>>,
     task: Option<Vec<ConfigTask>>,
+    honest: Option<HonestConfig>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -66,6 +68,15 @@ struct ConfigTask {
     db_set: Option<bool>,
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+struct HonestConfig {
+    ok_cycle: Duration,
+    fail_cycle: Duration,
+    path: PathBuf,
+}
+
+
 #[derive(Debug)]
 #[allow(dead_code)]
 struct State {
@@ -91,6 +102,11 @@ enum Command {
         val: String,
         resp: oneshot::Sender<Option<usize>>,
         //resp: mpsc::Sender<Option<String>>,
+    },
+    Lindex {
+        key: String,
+        idx: isize,
+        resp: oneshot::Sender<Option<String>>,
     },
 }
 
@@ -118,6 +134,11 @@ async fn conn_access_task(
                 let ret: Option<usize> = conn.publish(key, val).await.ok();
                 //debug!("[conn_access_task]: todo {}", ret);
                 let _ = resp.send(ret);
+            }
+            Command::Lindex { key, idx, resp } => {
+                let value: Option<String> = conn.lindex(key, idx).await.ok();
+                //info!("[conn_access_task]: todo {}", value);
+                let _ = resp.send(value);
             }
         }
     }
@@ -256,35 +277,35 @@ async fn set_message(chan_tx: mpsc::Sender<Command>, topic: String, payload: Str
 async fn capture_process_stream(
     process_stream: Result<impl Stream<Item = ProcessItem> + Send + std::marker::Unpin>,
 ) -> Result<String> {
-    let mut output = String::new();
-    let mut error = String::new();
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    let mut exit = -1;
 
     if let Ok(mut cmd_stream) = process_stream {
         while let Some(pi) = cmd_stream.next().await {
             match pi {
                 ProcessItem::Exit(e) => {
                     debug!("Exit {e}");
-                    /* TODO, how to know kill or error exit? */
+                    exit = e.parse::<i8>().unwrap_or(-1);
                 }
                 ProcessItem::Error(e) => {
                     debug!("Error {e}");
-                    error.push_str(&e);
+                    stderr.push_str(&e);
                 }
                 ProcessItem::Output(o) => {
                     debug!("Output {o}");
-                    output.push_str(&o);
+                    stdout.push_str(&o);
                 }
             }
         }
     } else {
-        //error!("{:#?} not found", process);
-        error.push_str(r#"Not Found}"#);
+        stderr.push_str(r#"Not Found}"#);
     }
 
-    if error.len() == 0 {
-        Ok(output)
+    if exit == 0 {
+        Ok(stdout)
     } else {
-        Err(anyhow!(error))
+        Err(anyhow!(stderr))
     }
 }
 
@@ -295,37 +316,46 @@ fn spawn_task_run_path_publish(
     timeout: Option<Duration>,
     db_publish: Option<bool>,
     db_set: Option<bool>,
-) -> Result<()> {
+) -> Result<tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
     let mut process = Process::new(&path);
-    if let Ok(process_stream) = process.spawn_and_stream() {
-        tokio::spawn(async move {
-            let timeout = match timeout {
-                Some(t) => t,
-                None => Duration::from_secs(86400), /* XXX 24h */
-            };
-            tokio::select! {
-                Ok(payload) = capture_process_stream(Ok(process_stream)) => {
-                    //debug!("task-{} completed", topic);
-                    if db_publish.is_some() {
-                        publish_message(chan_tx.clone(), topic.clone(), payload.clone()).await?;
+    match process.spawn_and_stream() {
+        Ok(process_stream) => {
+            let job = tokio::spawn(async move {
+                let timeout = match timeout {
+                    Some(t) => t,
+                    None => Duration::from_secs(86400), /* XXX 24h */
+                };
+                tokio::select! {
+                    out = capture_process_stream(Ok(process_stream)) => {
+                        match out {
+                            Ok(payload) => {
+                                if db_publish.is_some() {
+                                    publish_message(chan_tx.clone(), topic.clone(), payload.clone()).await?;
+                                }
+                                if db_set.is_some() {
+                                    set_message(chan_tx, topic, payload).await?;
+                                }
+                            },
+                            Err(e) => {
+                                error!("process return error-{:?}", e);
+                            },
+                        }
                     }
-                    if db_set.is_some() {
-                        set_message(chan_tx, topic, payload).await?;
+                    _ = time::sleep(timeout) => {
+                        process.kill().await;
+                        warn!("{} task timeout({:?}) exit", topic, timeout);
+                    }
+                    else => {
+                        warn!("else case?");
                     }
                 }
-                _ = time::sleep(timeout) => {
-                    error!("{} task timeout({:?}) exit", topic, timeout);
-                    process.kill().await;
-                }
-                else => {
-                }
-            }
-            /* help the rust type inferencer out, ref https://tokio.rs/tokio/tutorial/select */
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
-        });
+                /* help the rust type inferencer out, ref https://tokio.rs/tokio/tutorial/select */
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+            });
+            Ok(job)
+        },
+        Err(e) => Err(anyhow!(e)),
     }
-
-    Ok(())
 }
 
 #[instrument(
@@ -523,6 +553,7 @@ async fn main() -> Result<(), MyError> {
         shared.clone(),
     ));
     let _pub_task = tokio::spawn(publish_task(chan_tx.clone(), shared.clone()));
+    let _cron_task = tokio::spawn(honest_task(chan_tx.clone(), shared.clone()));
 
     let future_sig_c = signal::ctrl_c();
 
@@ -536,15 +567,73 @@ async fn main() -> Result<(), MyError> {
     Ok(())
 }
 
-#[tokio::test]
-async fn test_toml_duration() {
-    let cp = ConfigTask {
-        topic: String::from("test"),
-        path: PathBuf::from("/tmp/test.sh"),
-        start_at: Some(Duration::from_secs(1)),
-        period: Some(Duration::from_secs(10)),
-    };
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct BossHcsPair {
+    hcs_sid: String,
+    hcs_token: String,
+    init_time: DateTime<Utc>,
+    invalid_time: DateTime<Utc>,
+}
 
-    let toml = toml::to_string(&cp);
-    assert_eq!(toml, Ok(String::from("hello")));
+#[instrument(
+    //level = "info",
+    name = "honest::task",
+    skip(chan_tx, shared),
+)]
+async fn honest_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) {
+    let mut fail_cycle = Duration::from_secs(10);
+    let mut ok_cycle = Duration::from_secs(10);
+    let mut cmd_path = PathBuf::from("/etc/fika_manager/boss_token.sh");
+    if let Ok(state) = shared.lock() {
+        if let Some(honest) = &state.cfg.honest {
+            fail_cycle = honest.fail_cycle;
+            ok_cycle = honest.ok_cycle;
+            cmd_path = honest.path.clone();
+        }
+    }
+    let mut when = Instant::now() + ok_cycle;
+
+    loop {
+        tokio::select! {
+            _ = time::sleep_until(when) => {
+                if let Ok(job) = spawn_task_run_path_publish(
+                    chan_tx.clone(),
+                    "boss.token".to_string(),
+                    cmd_path.clone(),
+                    Some(Duration::from_secs(10)),
+                    None, None) {
+
+                    if !job.is_finished() {
+                        _ = job.await;
+                    }
+                    debug!("job {:?} completed", &cmd_path);
+
+                    let (resp_tx, resp_rx) = oneshot::channel();
+                    if let Ok(_) = chan_tx.send(Command::Lindex {
+                        key: String::from("boss.hcs.token.list"),
+                        idx: 0,
+                        resp: resp_tx,
+                    }).await {
+                        if let Ok(Some(res)) = resp_rx.await {
+                            if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&res) {
+                                debug!("challenge struct as {:?}", res);
+                                let now = Utc::now();
+                                if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
+                                    let delta = boss_hcs.invalid_time - now;
+                                    when = Instant::now() + delta.to_std().unwrap_or(ok_cycle);
+                                    info!("Next refresh cycle at {:?}", when);
+                                } else {
+                                    when = Instant::now() + ok_cycle;
+                                    error!("Older one refresh cycle at {:?}", when);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+                when = Instant::now() + fail_cycle;
+                error!("Otherwise rollback refresh cycle at {:?}", when);
+            }
+        }
+    }
 }

@@ -3,7 +3,7 @@ pre="/etc/fika_manager/factory/pre_core.sh"
 post="/etc/fika_manager/factory/post_core.sh"
 key = "kap.core"
 [core.cfg]
-wallet_address = "0x365962cd383a593975E743fD59Bbf2C1Bc141CF5"
+wallet_address = "change-me"
 database_url = "redis://127.0.0.1:6379"
 
 [network]

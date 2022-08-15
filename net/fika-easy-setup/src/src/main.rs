@@ -50,7 +50,7 @@ use fika_easy_setup::kap_core::CoreMenu;
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.1",
+    version = "0.0.2",
 )]
 struct Opt {
     /// set the listen addr
@@ -948,6 +948,7 @@ impl BossHcsPair {
         Err(anyhow::anyhow!("HCS task not found"))
     }
 
+    #[cfg(challenge_limit)]
     async fn new_challenge(
         &self,
         conn: &mut redis::aio::Connection,
@@ -965,6 +966,15 @@ impl BossHcsPair {
         }
 
         return Ok(());
+    }
+
+    #[cfg(not(challenge_limit))]
+    async fn new_challenge(
+        &self,
+        _conn: &mut redis::aio::Connection,
+        _challenger_id: &str,
+    ) -> Result<()> {
+        Ok(())
     }
 
     async fn push_server(
