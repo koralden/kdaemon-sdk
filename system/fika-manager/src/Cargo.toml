@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "fika-manager-recovery"
 path = "src/recovery.rs"
 
+[[bin]]
+name = "fika-honest-challenge"
+path = "src/honest-challenge.rs"
+
 [dependencies]
 anyhow = "1.0.58"
 async-trait = "0.1.56"

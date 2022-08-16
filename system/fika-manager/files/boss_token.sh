@@ -24,9 +24,9 @@ remove_expired_task() {
     for item in $(redis-cli LRANGE boss.hcs.token.list 0 -1); do
         #my_log debug "[remove_expired_task]: item=$item"
         [ -z "$item" ] && break
-        invalidT=$(echo $item | jq -r .invalid_time)
-        invalidS=$(date -d "$(echo ${invalidT} | sed -e 's,T, ,' -e 's,+.*$,,')" +%s)
         sid=$(echo $item | jq -r .hcs_sid)
+        invalidT=$(echo $item | jq -r .invalid_time)
+        invalidS=$(fika-honest-challenge -t $invalidT)
 
         #my_log debug "[remove_expired_task]: invalidT=$invalidT invalidS=$invalidS sid=$sid vs now=$now"
 
