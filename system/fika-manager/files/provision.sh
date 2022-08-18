@@ -1,15 +1,17 @@
 #!/bin/sh
 
 [ -z "$docdir" ] && docdir="/etc/fika_manager"
-sdk="\"unknown\""
-wallet="unknown"
 
 #[ -e /dev/log ] && logger -s -t fika-manager -p debug "[$0] docdir=$docdir"
 
-[ -e ${docdir}/config.toml ] && sdk=$(awk '/^version/ {print $3}' ${docdir}/config.toml)
-[ -e ${docdir}/wallet.pub ] && sdk=$(cat ${docdir}/wallet.pub)
+sdk=$(fika-manager -V | awk '{print $2}')
+sdk=${sdk:-0.0.0}
+wallet=$(redis-cli get kap.core | jq -r .wallet_address)
+nickname=$(redis-cli get kap.por.config | jq -r .nickname)
+#XXX, jq response *null* if key nonexist
 
 jq -rcM --null-input \
-    --argjson sdk "$sdk" \
+    --arg sdk "$sdk" \
     --arg wallet "$wallet" \
-    '{ "sdk-version": $sdk, "ap-wallet-address": $wallet }'
+    --arg nickname "$nickname" \
+    '{ "sdk-version": $sdk, "ap-wallet-address": $wallet, "nickname": $nickname }'

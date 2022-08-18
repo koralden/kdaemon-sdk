@@ -13,7 +13,7 @@ topic = "kdaemon.easy.setup"
 path = "/etc/fika_manager/easy_setup.sh"
 
 [[subscribe]]
-topic = "kdaemon.por.config"
+topic = "kap.por.config"
 path = "/etc/fika_manager/por_config.sh"
 
 [[subscribe]]

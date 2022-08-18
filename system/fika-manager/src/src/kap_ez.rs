@@ -17,4 +17,5 @@ pub struct NetworkMenu {
 #[allow(dead_code)]
 pub struct PorMenu {
     state: bool,
+    nickname: Option<String>,
 }

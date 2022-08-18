@@ -18,9 +18,10 @@ wifi_password = "change-me"
 password_overwrite = "on"
 
 [por]
-key = "kdaemon.por.config"
+key = "kap.por.config"
 [por.cfg]
 state = false
+nickname = "change-me"
 
 [boss]
 post="/etc/fika_manager/factory/post_boss.sh"

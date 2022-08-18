@@ -33,6 +33,10 @@
                         <input id="state" class="w3-check" type="checkbox">
                         <label>Enable K-Public WIFI</label>
                     </div>
+                    <div class="w3-container w3-margin-top">
+                        <label>NickName: </label>
+                        <input id="nickname" name="nickname" class="w3-input w3-center" placeholder="Nick-Name" type="text" maxlength="20">
+                    </div>
                     <div class="user-submit w3-container w3-margin-top">
                         <button id="submit" class="w3-button w3-section w3-blue w3-ripple w3-padding w3-block">Submit</button>
                     </div>
@@ -49,12 +53,14 @@
 
             $(document).ready(function () {
                 $("#state").prop('checked', getJson["state"]);
+                $("#nickname").val(getJson["nickname"]);
 
                 $('#submit').on('click', function (event) {
                     event.preventDefault();
 
                     var dataJSON = {};
                     dataJSON["state"] = $('#state').is(":checked");
+                    dataJSON["nickname"] = $('#nickname').val();
 
                     $.ajax({
                         type: 'POST',

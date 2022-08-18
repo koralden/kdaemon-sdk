@@ -25,7 +25,7 @@ FIKA_MANAGER_MY_DIR=package/longdong/system/fika-manager/files
 FIKA_MANAGER_MY_SCRIPT=easy_setup.sh heartbeat.sh common.sh captive-portal.sh \
 	     maker.sh provision.sh runtime_statistics.sh \
 	     nms_remote_manage.sh system_checking.sh por_config.sh \
-	     hcs_honest_challenge.sh boss_token.sh \
+	     hcs_honest_challenge.sh boss_token.sh misc.sh \
 	     thirdparty/firewall.sh thirdparty/network.sh thirdparty/system.sh \
 	     factory/post_core.sh factory/post_wifi_ssid_by_uci.sh \
 	     factory/post_boss.sh factory/post_cmp.sh \

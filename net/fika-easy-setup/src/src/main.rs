@@ -1168,6 +1168,7 @@ const POR_TEMP: &str = std::include_str!("../templates/por.html");
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 struct PorCfg {
     state: bool,
+    nickname: Option<String>,
 }
 
 async fn _por_config(
@@ -1180,13 +1181,15 @@ async fn _por_config(
         let mut cfg = String::from("{}");
         if let Ok(mut conn) = cache.get_async_connection().await {
             cfg = conn
-                .get::<&str, String>("kdaemon.por.config")
+                .get::<&str, String>(KEY_KAP_POR_CONFIG)
                 .await
                 .unwrap_or_else(|_| "{}".into());
         }
         Html(POR_TEMP.replace("{{ getJSON }}", &cfg)).into_response()
     }
 }
+
+static KEY_KAP_POR_CONFIG: &str = "kap.por.config";
 
 // Valid user session required. If there is none, redirect to the auth page
 async fn por_wifi(
@@ -1207,21 +1210,21 @@ async fn por_wifi(
 
         if let Ok(mut conn) = cache.get_async_connection().await {
             match conn
-                .set::<&str, &str, String>("kdaemon.por.config", &msg)
+                .set::<&str, &str, String>(KEY_KAP_POR_CONFIG, &msg)
                 .await
             {
                 Ok(_) => {}
                 Err(_e) => {
-                    debug!("db set kdaemon.por.config {}", &msg);
+                    debug!("db set {} as {}", KEY_KAP_POR_CONFIG, &msg);
                 }
             }
 
-            conn.publish::<&str, &str, usize>("kdaemon.por.config", &msg)
+            conn.publish::<&str, &str, usize>(KEY_KAP_POR_CONFIG, &msg)
                 .await
                 .unwrap();
 
             let mut sub_conn = conn.into_pubsub();
-            sub_conn.subscribe("kdaemon.por.config.ack").await.unwrap();
+            sub_conn.subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG)).await.unwrap();
             let mut sub_stream = sub_conn.on_message();
 
             resp = tokio::select! {
@@ -1246,10 +1249,10 @@ async fn por_wifi(
 
         get_result_emoji("PoR service", &resp).await.into_response()
     } else {
-        let mut cfg = String::from(r#"{"state":true}"#);
+        let mut cfg = String::from(r#"{"state":true,"nickname":"null"}"#);
         if let Ok(mut conn) = cache.get_async_connection().await {
             cfg = conn
-                .get::<&str, String>("kdaemon.por.config")
+                .get::<&str, String>(KEY_KAP_POR_CONFIG)
                 .await
                 .unwrap_or_else(|_| "{}".into());
         }
