@@ -934,10 +934,13 @@ struct BossHcsPair {
     invalid_time: DateTime<Utc>,
 }
 
+static KEY_BOSS_HCS_CHALLENGERS: &str = "boss.hcs.challengers";
+
 impl BossHcsPair {
     async fn get(conn: &mut redis::aio::Connection) -> Result<BossHcsPair> {
-        if let Ok(token) = conn.lindex::<&str, String>("boss.hcs.token.list", 0).await {
-            debug!("redis boss.hcs.token.list first ^{}$ success", token);
+        let hcs_list = "boss.hcs.token.list";
+        if let Ok(token) = conn.lindex::<&str, String>(hcs_list, 0).await {
+            debug!("redis {} first ^{}$ success", hcs_list, token);
             if let Ok(boss_hcs) = serde_json::from_str::<BossHcsPair>(&token) {
                 let now = Utc::now();
                 if now >= boss_hcs.init_time && now < boss_hcs.invalid_time {
@@ -954,7 +957,7 @@ impl BossHcsPair {
         conn: &mut redis::aio::Connection,
         challenger_id: &str,
     ) -> Result<()> {
-        let key = format!("boss.hcs.challengers.{}", self.hcs_sid);
+        let key = format!("{}.{}", KEY_BOSS_HCS_CHALLENGERS, self.hcs_token);
         if let Ok(exist) = conn.hexists::<&str, &str, bool>(&key, challenger_id).await {
             if exist {
                 return Err(anyhow::anyhow!(
@@ -987,12 +990,12 @@ impl BossHcsPair {
             "hashed": hashed,
             "sent": false
         });
-        let key = format!("boss.hcs.challengers.{}", self.hcs_sid);
+        let key = format!("{}.{}", KEY_BOSS_HCS_CHALLENGERS, self.hcs_token);
         let _ = conn
             .hset::<&str, &str, &str, _>(&key, challenger_id, &value.to_string())
             .await?;
 
-        let notify = "honest.challenger";
+        let notify = "boss.honest.challenger";
         let _ = conn.publish::<&str, &str, _>(notify, challenger_id).await?;
         Ok(())
     }
@@ -1048,6 +1051,11 @@ async fn update_honest_challenge(
 
     if &hc_request.gw_id != &wallet {
         resp.code = 405; //METHOD_NOT_ALLOWED;
+        return (StatusCode::OK, Json(resp));
+    }
+
+    if hc_request.hashed.len() > 128 {
+        resp.code = 400; //BAD_REQUEST due to length overflow
         return (StatusCode::OK, Json(resp));
     }
 

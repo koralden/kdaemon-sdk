@@ -11,4 +11,5 @@ pub struct BossMenu {
     pub otp_path: String,
     pub ap_token_path: String,
     pub hcs_path: String,
+    pub ap_hcs_path: String,
 }

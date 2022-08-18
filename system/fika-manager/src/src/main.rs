@@ -581,6 +581,7 @@ struct BossHcsPair {
     skip(chan_tx, shared),
 )]
 async fn honest_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) {
+    let key_hcs_list = "boss.hcs.token.list";
     let mut fail_cycle = Duration::from_secs(10);
     let mut ok_cycle = Duration::from_secs(10);
     let mut cmd_path = PathBuf::from("/etc/fika_manager/boss_token.sh");
@@ -610,7 +611,7 @@ async fn honest_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) 
 
                     let (resp_tx, resp_rx) = oneshot::channel();
                     if let Ok(_) = chan_tx.send(Command::Lindex {
-                        key: String::from("boss.hcs.token.list"),
+                        key: String::from(key_hcs_list),
                         idx: 0,
                         resp: resp_tx,
                     }).await {

@@ -29,7 +29,7 @@ path = "/etc/fika_manager/nms_remote_manage.sh"
 #path = "/etc/fika_manager/cmp_pairing.sh"
 
 [[subscribe]]
-topic = "honest.challenger"
+topic = "boss.honest.challenger"
 path = "/etc/fika_manager/hcs_honest_challenge.sh"
 
 [[task]]

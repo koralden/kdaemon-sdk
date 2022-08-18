@@ -40,6 +40,8 @@ struct Opt {
     config: String,
     #[clap(short = 'l', long = "log-level", default_value = "info")]
     log_level: String,
+    #[clap(short, long, action)]
+    force: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -56,11 +58,11 @@ struct KapFactory {
 trait FactoryAction {
     async fn post(&self) -> Result<()>;
     async fn pre(&self) -> Result<()>;
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()>;
+    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()>;
 
-    async fn run(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn run(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
         _ = self.pre().await?;
-        _ = self.key_apply(db_conn).await?;
+        _ = self.key_apply(db_conn, force).await?;
         _ = self.post().await?;
         Ok(())
     }
@@ -111,9 +113,9 @@ impl FactoryAction for KapCoreConfig {
     }
 
     #[instrument(name = "core-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
         let key = &self.key;
-        if db_conn.exists::<&str, bool>(&key).await? == true {
+        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
             debug!("db key - {} exist", &key);
             return Ok(());
         }
@@ -172,9 +174,9 @@ impl FactoryAction for KapNetworkConfig {
     }
 
     #[instrument(name = "network-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
         let key = &self.key;
-        if db_conn.exists::<&str, bool>(&key).await? == true {
+        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
             debug!("db key - {} exist", &key);
             return Ok(());
         }
@@ -236,9 +238,9 @@ impl FactoryAction for KapPorConfig {
     }
 
     #[instrument(name = "por-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
         let key = &self.key;
-        if db_conn.exists::<&str, bool>(&key).await? == true {
+        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
             debug!("db key - {} exist", &key);
             return Ok(());
         }
@@ -287,9 +289,9 @@ impl FactoryAction for KapBossConfig {
     }
 
     #[instrument(name = "boss-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
         let key = &self.key;
-        if db_conn.exists::<&str, bool>(&key).await? == true {
+        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
             debug!("db key - {} exist", &key);
             return Ok(());
         }
@@ -335,9 +337,9 @@ impl FactoryAction for KapCmpConfig {
     }
 
     #[instrument(name = "cmp-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
         let key = &self.key;
-        if db_conn.exists::<&str, bool>(&key).await? == true {
+        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
             debug!("db key - {} exist", &key);
             return Ok(());
         }
@@ -351,7 +353,7 @@ impl FactoryAction for KapCmpConfig {
 }
 
 #[instrument(name = "recovery", skip(cfg))]
-async fn main_task(cfg: KapFactory) -> Result<()> {
+async fn main_task(cfg: KapFactory, force: bool) -> Result<()> {
     debug!("cfg content as {:#?}", cfg);
 
     let mut db_conn = redis::Client::open(&*cfg.core.cfg.database_url)?
@@ -359,11 +361,11 @@ async fn main_task(cfg: KapFactory) -> Result<()> {
         .await?;
     //let db_conn = Arc::new(Mutex::new(db_conn));
 
-    _ = cfg.core.run(&mut db_conn).await?;
-    _ = cfg.network.run(&mut db_conn).await?;
-    _ = cfg.por.run(&mut db_conn).await?;
-    _ = cfg.boss.run(&mut db_conn).await?;
-    _ = cfg.cmp.run(&mut db_conn).await?;
+    _ = cfg.core.run(&mut db_conn, force).await?;
+    _ = cfg.network.run(&mut db_conn, force).await?;
+    _ = cfg.por.run(&mut db_conn, force).await?;
+    _ = cfg.boss.run(&mut db_conn, force).await?;
+    _ = cfg.cmp.run(&mut db_conn, force).await?;
 
     Ok(())
 }
@@ -390,8 +392,9 @@ async fn main() -> Result<(), MyError> {
 
     let cfg = fs::read_to_string(opt.config).await?;
     let cfg: KapFactory = toml::from_str(&cfg)?;
+    let force = opt.force;
 
-    let main_jhandle = tokio::spawn(main_task(cfg));
+    let main_jhandle = tokio::spawn(main_task(cfg, force));
     let future_sig_c = signal::ctrl_c();
 
     tokio::select! {
