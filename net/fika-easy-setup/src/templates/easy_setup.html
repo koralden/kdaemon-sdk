@@ -41,8 +41,8 @@
                         </div>
                         <div id="wan_pppoe" class="wan_pppoe w3-panel">
                             <h4 class="w3-left">WAN/PPPoE</h4>
-                            <input id="wan_username" name="wan_username" class="w3-input w3-margin-top w3-center" placeholder="Username" type="text">
-                            <input id="wan_password" name="wan_password" class="w3-input w3-margin-top w3-center" placeholder="Password" type="password">
+                            <input id="wan_username" name="wan_username" class="wan_username w3-input w3-margin-top w3-center" placeholder="Username" type="text" maxlength="128">
+                            <input id="wan_password" name="wan_password" class="wan_password w3-input w3-margin-top w3-center" placeholder="Password" type="password" maxlength="128">
                         </div>
                     </div>
                     <div id="wifi_private" class="wifi_private w3-panel w3-border w3-margin-top">
@@ -50,10 +50,10 @@
                             <h3 class="w3-left">WIFI/Private</h3>
                         </div>
                         <div id="wan_type" class="w3-container w3-margin-top">
-                            <input id="wifi_ssid" name="wifi_ssid" class="w3-input w3-center" placeholder="SSID" type="text">
+                            <input id="wifi_ssid" name="wifi_ssid" class="wifi_ssid w3-input w3-center" placeholder="SSID" type="text" maxlength="32">
                         </div>
                         <div id="wan_type" class="w3-container w3-margin-top">
-                            <input id="wifi_password" name="wifi_password" class="w3-input w3-center" placeholder="Password" type="password">
+                            <input id="wifi_password" name="wifi_password" class="wifi_password w3-input w3-center" placeholder="Password" type="password" size="8" maxlength="63">
                         </div>                                                                                                                                                                                                                                          <div class="w3-container w3-left w3-margin-top">                                                                                                                                                                                                    <input id="password_overwrite" name="password_overwrite" class="w3-check" type="checkbox" checked="checked">                                                                                                                                    <label class="w3-tooltip">Overwrite system password<span class="w3-text">(<em>as same as WIFI/private password</em>)</span></label></p>
                         </div>
                     </div>
@@ -68,14 +68,27 @@
         </script>
         <script>
             var getJson = {{ getJson }};
+
+            function verify_chap(str) {
+                return (/[ \t]/.test(str) == false);
+            }
+
+            function verify_wifi_ssid(str) {
+                return (/^[^!#;+\]\/"\t][^+\]\/"\t]{0,30}[^ !#;+\]\/"\t]$|^[^ !#;+\]\/"\t]$/.test(str) == true);
+            }
+
+            function verify_wifi_pwd(str) {
+                return (/^[\u0020-\u007e]{8,63}$/.test(str) == true);
+            }
+
             $(document).ready(function () {
                             if (getJson["wan_type"] == 0) {
-                                            $("#wan_type_dhcp").prop('checked', true);
-                                            $("#wan_pppoe").hide();
-                                        } else {
-                                                        $("#wan_type_pppoe").prop('checked', true);
-                                                        $("#wan_pppoe").show();
-                                                    }
+                                $("#wan_type_dhcp").prop('checked', true);
+                                $("#wan_pppoe").hide();
+                            } else {
+                                $("#wan_type_pppoe").prop('checked', true);
+                                $("#wan_pppoe").show();
+                            }
                             $("#wan_username").val(getJson["wan_username"]);
                             $("#wan_password").val(getJson["wan_password"]);
                             $("#wifi_ssid").val(getJson["wifi_ssid"]);
@@ -88,10 +101,45 @@
                             $("#wan_type_dhcp").click(function() {
                                             $("#wan_pppoe").hide();
                                         })
+
+                            // ref https://docs.oracle.com/cd/E19455-01/806-0916/6ja8539e8/index.html
+                            $(".wan_username").blur(function() {
+                                if (verify_chap($(this).val()) == false) {
+                                    alert("A single token without embedded white space. The standard ANSI C \ escape sequence can be used to embed special characters. Use \s for the space character. Any pound sign at the beginning of the string must be escaped (\#) to avoid interpretation as a comment. A NULL (\0) truncates the string");
+                                }
+                            });
+                            $(".wan_password").blur(function() {
+                                if (verify_chap($(this).val()) == false) {
+                                    alert("A single token without embedded white space. The standard ANSI C \ escape sequence can be used to embed special characters. Use \s for the space character. Any pound sign at the beginning of the string must be escaped (\#) to avoid interpretation as a comment. A NULL (\0) truncates the string");
+                                }
+                            });
+                            // ref from https://stackoverflow.com/questions/45249961/javascript-validate-ssid-and-wpa-wpa2
+                            $(".wifi_ssid").blur(function() {
+                                if (verify_wifi_ssid($(this).val()) == false) {
+                                    alert("The SSID can consist of up to 32 alphanumeric, case-sensitive, characters. The first character cannot be the !, #, or ; character. The +, ], /, \", TAB, and trailing spaces are invalid characters for SSIDs");
+                                }
+                            });
+                            $(".wifi_password").blur(function() {
+                                if (verify_wifi_pwd($(this).val()) == false) {
+                                    alert("8 to 63 printable ASCII characters, with encoding ranging from 32 to 126");
+                                }
+                            });
+
                             const myForm = $("#myForm");
                             $(".easy-setup .user-submit").click(function() {
-                                            myForm.submit();
-                                        })
+                                if (verify_wifi_ssid($(".wifi_ssid").val())
+                                        && verify_wifi_pwd($(".wifi_password").val())) {
+                                    if (($('#state').is(":checked") == false) ||
+                                            (verify_chap($(".wan_username").val())
+                                            && verify_chap($(".wan_password").val()))) {
+                                        myForm.submit();
+                                    } else {
+                                        alert("PPPoE username or password format invalid");
+                                    }
+                                } else {
+                                    alert("WIFI SSID or password format invalid");
+                                }
+                            })
                         });
         </script>
     </body>
