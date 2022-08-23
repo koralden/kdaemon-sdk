@@ -24,12 +24,22 @@ struct Opt {
 
     #[clap(short, long, action)]
     tasks: bool,
+
+    #[clap(short, long, action)]
+    rfc3339: bool,
 }
 
 #[instrument(name = "timestamp", )]
 async fn do_timestamp(t: DateTime<Utc>) -> Result<()> {
     debug!("DateTime - {:?} to Timestamp - {}", t, t.timestamp());
     println!("{}", t.timestamp());
+    Ok(())
+}
+
+#[instrument(name = "rfc3339", )]
+async fn do_rfc3339() -> Result<()> {
+    let now = Utc::now();
+    println!("{}", now.to_rfc3339_opts(SecondsFormat::Secs, false));
     Ok(())
 }
 
@@ -64,6 +74,9 @@ async fn main() -> Result<()> {
 
     if let Some(t) = opt.timestamp {
         return do_timestamp(t).await;
+    }
+    if opt.rfc3339 {
+        return do_rfc3339().await;
     }
     if opt.tasks {
         return do_tasks(opt.cron).await;

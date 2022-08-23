@@ -12,7 +12,7 @@ start() {
 	network_get_ipaddrs lanIp lan
 	network_get_ipaddrs kguestIp kguest
         [ -z "$kguestIp" ] && kguestIp="192.168.178.1"
-        grep -q k-ap /etc/hosts || echo -e "$lanIp\tk-ap$kguest\tk-ap" >> /tmp/hosts/longdong
+        grep -q k-ap /etc/hosts || echo -e "$lanIp\tk-ap$kguest\tk-ap" > /tmp/hosts/longdong
 	printf "Starting fika-easy-setup: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \

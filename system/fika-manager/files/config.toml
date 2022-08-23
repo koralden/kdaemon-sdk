@@ -40,22 +40,22 @@ db_publish = true
 
 [[task]]
 topic = "nms.shadow.update.heartbeat"
-period = {secs = 600, nanos = 0 }
+period = {secs = 295, nanos = 0 }
 path = "/etc/fika_manager/heartbeat.sh"
 db_publish = true
 
-[[task]]
-topic = "nms.shadow.update.runtime-statistics"
-start_at = {secs = 30, nanos = 0 }
-period = {secs = 600, nanos = 0 }
-path = "/etc/fika_manager/runtime_statistics.sh"
-db_publish = true
-
-[[task]]
-topic = "nms.shadow.update.maker"
-start_at = {secs = 10, nanos = 0 }
-path = "/etc/fika_manager/maker.sh"
-db_publish = true
+#[[task]]
+#topic = "nms.shadow.update.runtime-statistics"
+#start_at = {secs = 30, nanos = 0 }
+#period = {secs = 600, nanos = 0 }
+#path = "/etc/fika_manager/runtime_statistics.sh"
+#db_publish = true
+#
+#[[task]]
+#topic = "nms.shadow.update.maker"
+#start_at = {secs = 10, nanos = 0 }
+#path = "/etc/fika_manager/maker.sh"
+#db_publish = true
 
 [[task]]
 topic = "kdaemon.system.checking"
