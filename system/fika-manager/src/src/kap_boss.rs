@@ -12,4 +12,5 @@ pub struct BossMenu {
     ap_token_path: String,
     hcs_path: String,
     ap_hcs_path: String,
+    ap_info_path: String,
 }
