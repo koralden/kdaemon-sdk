@@ -175,4 +175,4 @@ main() {
         '{ "message": $msg, "code": $code }'
 }
 
-main $@
+[ $# -gt 0 ] && main $@

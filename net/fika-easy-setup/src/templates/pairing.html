@@ -29,14 +29,14 @@
                 <a href="/logout" class="w3-button"><i class="fa fa-person-running"></i></a>
             </div>
             <div class="w3-rest w3-container">
+                <div class="w3-container w3-card w3-indigo w3-margin-top">
+                    <h2>Device Pairing</h2>
+                </div>
                 <div id="warning" class="w3-panel w3-green w3-display-container" style="display:none">
                     <span onclick="this.parentElement.style.display='none'"
                         class="w3-button w3-display-topright">X</span>
-                    <p>This device has been paired by {{ ownerId }} ID.</p>
-                    <p>Account transfer only between users via APP.</p>
-                </div>
-                <div class="w3-container w3-card w3-indigo w3-margin-top">
-                    <h2>Device Pairing</h2>
+                    <p>This device has been paired with {{ ownerId }}.</p>
+                    <p>If have any problem, please contact the platform administrator.</p>
                 </div>
                 <form id="pairing" class="w3-container w3-card-4 w3-dark-gray w3-center">
                     <div class="w3-center w3-margin" id="browserOnly">

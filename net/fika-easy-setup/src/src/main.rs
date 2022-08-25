@@ -33,11 +33,13 @@ use qrcode::render::svg;
 use qrcode::QrCode;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::iter::repeat_with;
 use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
+use std::collections::HashMap;
 use tokio::time::{self, Duration};
 use tracing::{debug, info /*, error*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -168,6 +170,7 @@ async fn private_service(mut opt: Opt) {
     let mut otp_path = opt.otp_path;
     let mut wallet = opt.wallet_addr;
     let mut access_token_ap = opt.access_token_ap;
+    let mut ap_info_path = None;
 
     if let Ok(mut db_conn) = cache.get_async_connection().await {
         /*let wallet = wallet.map_or_else(|e| {
@@ -197,6 +200,7 @@ async fn private_service(mut opt: Opt) {
             api_url = api_url.or(Some(value.root_url));
             access_token = access_token.or(Some(value.access_token));
             otp_path = otp_path.or(Some(value.otp_path));
+            ap_info_path = Some(value.ap_info_path);
         }
         let value = db_conn.get::<&str, String>("kap.boss.ap.token").await;
         if let Ok(value) = value {
@@ -207,6 +211,7 @@ async fn private_service(mut opt: Opt) {
     let otp = ServerCtx::new(
         api_url,
         otp_path,
+        ap_info_path,
         access_token,
         access_token_ap,
         wallet,
@@ -618,6 +623,7 @@ struct InternalServerCtx {
 struct ServerCtx {
     api_url: String,
     otp_path: String,
+    ap_info_path: String,
     access_token: String,
     access_token_ap: String,
     wallet: String,
@@ -633,6 +639,7 @@ impl ServerCtx {
     fn new(
         api_url: Option<String>,
         otp_path: Option<String>,
+        ap_info_path: Option<String>,
         access_token: Option<String>,
         access_token_ap: Option<String>,
         wallet: Option<String>,
@@ -645,6 +652,7 @@ impl ServerCtx {
             access_token_ap: access_token_ap
                 .map_or("02ec7a905b70689d9b30c6118fd1e62f".to_owned(), |v| v),
             otp_path: otp_path.map_or("v0/ap/otp".to_owned(), |v| v),
+            ap_info_path: ap_info_path.map_or("v0/ap/info".to_owned(), |v| v),
             wallet: wallet.map_or(
                 "5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT".to_owned(),
                 |v| v,
@@ -661,7 +669,7 @@ impl ServerCtx {
         }
     }
 
-    async fn rest_get(&self) -> Result<String> {
+    async fn get_boss_otp(&self) -> Result<String> {
         /*let mac = String::from("A1:A2:33:44:55:66");
         let invalid_time;
         {
@@ -700,6 +708,40 @@ impl ServerCtx {
 
               Ok(internal.otp.clone())
           }*/
+    }
+
+    async fn get_boss_owner(&self) -> Result<String> {
+        let url = format!("{}/{}", &self.api_url, &self.ap_info_path);
+
+        let mut map = HashMap::new();
+        map.insert("ap_wallet", &self.wallet);
+
+        let client = reqwest::Client::new();
+        let mut response = client
+            .get(&url)
+            //.bearer_auth(token.access_token().secret())
+            .header("ACCESSTOKEN", &self.access_token)
+            .header("ACCESSTOKEN-AP", &self.access_token_ap)
+            .json(&map)
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+
+        debug!("{} get json-{:?}", url, response);
+
+        match serde_json::from_value::<u16>(response["code"].take()) {
+            Ok(code) => {
+                if code == 200 {
+                    Ok(serde_json::from_value::<String>(response["data"]["user_wallet"].take()).unwrap())
+                } else {
+                    Err(anyhow::anyhow!(serde_json::from_value::<String>(response["message"].take()).unwrap()))
+                }
+            },
+            _ => {
+                Err(anyhow::anyhow!("unknown error".to_owned()))
+            }
+        }
     }
 
     fn as_app_query(&self, otp: Option<String>) -> Result<KAppOtp> {
@@ -803,8 +845,25 @@ async fn show_pairing(
         return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
 
-    let pincode = server_ctx.rest_get().await.ok();
-    let app_otp = server_ctx.as_app_query(pincode).unwrap();
+    let owner = server_ctx.get_boss_owner().await;
+    let (owner_id, paired, app_otp) = if owner.is_ok() {
+        let otp = KAppOtp {
+            ap_wallet: "...".to_string(),
+            otp: "...".to_string(),
+            url: "...".to_string(),
+        };
+        (owner.unwrap(), true, otp)
+    } else {
+        let pincode = server_ctx.get_boss_otp().await.ok();
+        let app_otp = server_ctx.as_app_query(pincode).unwrap();
+
+        ("non-exist-owner".to_string(), false, app_otp)
+    };
+
+    let owner_json = json!({
+        "ownerId": owner_id,
+        "paired": paired
+    });
 
     let cfg = serde_json::to_string(&app_otp).unwrap();
     let code = QrCode::new(cfg.into_bytes()).unwrap();
@@ -819,22 +878,12 @@ async fn show_pairing(
         .into_bytes();
     image.push(b'\n');
 
-    /* TODO implement check paired flow */
-    /*let paired = if server_ctx.wallet != Some(opt.wallet_addr) {
-    paired = format!(r#"{{"ownerId": "{}", "paired": true}}"#, server_ctx.wallet.as_ref().unwrap());
-    } else {
-    paired = format!(r#"{{"ownerId": "{}", "paired": false}}"#, server_ctx.wallet.as_ref().unwrap());
-    };*/
-    let paired = format!(
-        r#"{{"ownerId": "{}", "paired": false}}"#,
-        &app_otp.ap_wallet
-    );
-
     Html(
         PAIRING_TEMP
             .replace("{{ content }}", &String::from_utf8_lossy(&image))
-            .replace("{{ getJson }}", &paired)
+            .replace("{{ getJson }}", &owner_json.to_string())
             .replace("{{ otp }}", &app_otp.otp)
+            .replace("{{ ownerId }}", &owner_id)
             .replace("{{ routerId }}", &app_otp.ap_wallet),
     )
     .into_response()

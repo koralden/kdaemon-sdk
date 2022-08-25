@@ -7,13 +7,14 @@ DEBUG=0
 KEY_BOSS_HCS_CHALLENGERS="boss.hcs.challengers"
 KEY_BOSS_HCS_LIST="boss.hcs.token.list"
 
+kapWallet=""
+accesstokenAp=""
 rootUrl=""
 accesstoken=""
 apTokenPath=""
 hcsPath=""
 apHcsPath=""
-kapWallet=""
-accesstokenAp=""
+apInfoPath=""
 
 db_fetch() {
     local kap_core kap_boss
@@ -28,6 +29,12 @@ db_fetch() {
     apHcsPath=$(echo $kap_boss | jq -r .ap_hcs_path)
     kapWallet=$(echo $kap_core | jq -r .wallet_address)
     accesstokenAp=$(redis-cli --raw GET kap.boss.ap.token)
+    apHcsPath=$(echo $kap_boss | jq -r .ap_info_path)
+
+    apTokenPath=${apTokenPath:-"v0/ap/ap_token"}
+    hcsPath=${hcsPath:-"v0/hcs/pair"}
+    apHcsPath=${apHcsPath:-"v0/ap/hcs"}
+    apInfoPath=${apInfoPath:-"v0/ap/info"}
 
     fika_log debug "appUrl: $rootUrl kapWallet: $kapWallet accesstoken: $accesstoken accesstokenAp: $accesstokenAp"
 

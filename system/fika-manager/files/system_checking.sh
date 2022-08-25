@@ -3,9 +3,26 @@
 code=200
 message="TODO"
 
-check_boss_ap_token() {
-    redis-cli GET kap.boss.ap.token $accesstokenAp
+check_ntp() {
+    echo "TODO"
 }
+
+check_boss_ap_token() {
+    apToken=$(redis-cli GET kap.boss.ap.token $accesstokenAp)
+
+    [ -n "$apToken" ] && return 0
+
+    . /etc/fika_manager/easy_setup.sh
+    get_boss_ap_token
+}
+
+check_owner() {
+    /etc/fika_manager/provision.sh check-owner
+}
+
+#check_ntp
+#check_boss_ap_token
+#check_owner
 
 payload=$(jq -rcM --null-input \
     --argjson code "$code" \
