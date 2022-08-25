@@ -58,12 +58,23 @@ struct KapFactory {
 trait FactoryAction {
     async fn post(&self) -> Result<()>;
     async fn pre(&self) -> Result<()>;
-    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()>;
+    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()>;
+    fn get_key(&self) -> &str;
 
     async fn run(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
+        let key = format!("{}.done", self.get_key());
+        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
+            debug!("db key - {} exist without force", &key);
+            return Ok(());
+        }
+
         _ = self.pre().await?;
-        _ = self.key_apply(db_conn, force).await?;
+        _ = self.key_apply(db_conn).await?;
         _ = self.post().await?;
+
+        db_conn.incr(&key, 1).await?;
+        debug!("{} run done", &key);
+
         Ok(())
     }
 }
@@ -94,7 +105,7 @@ impl FactoryAction for KapCoreConfig {
         Ok(())
     }
 
-    #[instrument(name = "core-pre", skip(self))]
+    #[instrument(name = "cor&e-pre", skip(self))]
     async fn pre(&self) -> Result<()> {
         if let Some(pre) = &self.pre {
             let args = serde_json::to_string(&self.cfg)?;
@@ -113,12 +124,8 @@ impl FactoryAction for KapCoreConfig {
     }
 
     #[instrument(name = "core-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
         let key = &self.key;
-        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
-            debug!("db key - {} exist", &key);
-            return Ok(());
-        }
 
         let args = serde_json::to_string(&self.cfg)?;
         debug!("args as {}", args);
@@ -126,6 +133,10 @@ impl FactoryAction for KapCoreConfig {
         db_conn.set(&key, &args).await?;
 
         Ok(())
+    }
+
+    fn get_key(&self) -> &str {
+        return &self.key;
     }
 }
 
@@ -174,19 +185,18 @@ impl FactoryAction for KapNetworkConfig {
     }
 
     #[instrument(name = "network-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
         let key = &self.key;
-        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
-            debug!("db key - {} exist", &key);
-            return Ok(());
-        }
-
         let args = serde_json::to_string(&self.cfg)?;
         debug!("args as {}", args);
 
         db_conn.set(&key, &args).await?;
 
         Ok(())
+    }
+
+    fn get_key(&self) -> &str {
+        return &self.key;
     }
 }
 
@@ -238,12 +248,8 @@ impl FactoryAction for KapPorConfig {
     }
 
     #[instrument(name = "por-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
         let key = &self.key;
-        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
-            debug!("db key - {} exist", &key);
-            return Ok(());
-        }
 
         let args = serde_json::to_string(&self.cfg)?;
         debug!("args as {}", args);
@@ -251,6 +257,10 @@ impl FactoryAction for KapPorConfig {
         db_conn.set(&key, &args).await?;
 
         Ok(())
+    }
+
+    fn get_key(&self) -> &str {
+        return &self.key;
     }
 }
 
@@ -260,6 +270,7 @@ struct KapBossConfig {
     cfg: BossMenu,
     key: String,
     post: Option<String>,
+    pre: Option<String>,
 }
 
 #[async_trait]
@@ -284,17 +295,24 @@ impl FactoryAction for KapBossConfig {
 
     #[instrument(name = "boss-pre", skip(self))]
     async fn pre(&self) -> Result<()> {
-        debug!("no pre command");
+        if let Some(pre) = &self.pre {
+            let args = serde_json::to_string(&self.cfg)?;
+            //debug!("args as {}", args);
+
+            let key = &self.key;
+            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
+
+            let status = child.wait().await?;
+            info!("command {} run completed - {}", pre, status);
+        } else {
+            debug!("no command");
+        }
         Ok(())
     }
 
     #[instrument(name = "boss-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
         let key = &self.key;
-        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
-            debug!("db key - {} exist", &key);
-            return Ok(());
-        }
 
         let args = serde_json::to_string(&self.cfg)?;
         debug!("args as {}", args);
@@ -302,6 +320,10 @@ impl FactoryAction for KapBossConfig {
         db_conn.set(&key, &args).await?;
 
         Ok(())
+    }
+
+    fn get_key(&self) -> &str {
+        return &self.key;
     }
 }
 
@@ -311,6 +333,7 @@ struct KapCmpConfig {
     cfg: CmpMenu,
     key: String,
     post: String,
+    pre: Option<String>,
 }
 
 #[async_trait]
@@ -332,23 +355,34 @@ impl FactoryAction for KapCmpConfig {
 
     #[instrument(name = "cmp-pre", skip(self))]
     async fn pre(&self) -> Result<()> {
-        debug!("no pre command");
+        if let Some(pre) = &self.pre {
+            let args = serde_json::to_string(&self.cfg)?;
+            //debug!("args as {}", args);
+
+            let key = &self.key;
+            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
+
+            let status = child.wait().await?;
+            info!("command {} run completed - {}", pre, status);
+        } else {
+            debug!("no command");
+        }
         Ok(())
     }
 
     #[instrument(name = "cmp-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
+    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
         let key = &self.key;
-        if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
-            debug!("db key - {} exist", &key);
-            return Ok(());
-        }
 
         let args = serde_json::to_string(&self.cfg)?;
         debug!("args as {}", args);
 
         db_conn.set(&key, &args).await?;
         Ok(())
+    }
+
+    fn get_key(&self) -> &str {
+        return &self.key;
     }
 }
 

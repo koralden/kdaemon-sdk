@@ -135,7 +135,9 @@ get_boss_ap_token() {
         if [ "X$code" = "X200" ]; then
             apToken=$(echo $json | jq -r .ap_token)
             logger -s -t easy-setup -p info "kap.boss.ap.token as $apToken"
-            [ -n "$apToken" ] && redis-cli SET kap.boss.ap.token $apToken
+            if [ -n "$apToken" ]; then
+                redis-cli SET kap.boss.ap.token $apToken
+            fi
         fi
     fi
 }
@@ -167,7 +169,8 @@ main() {
 
     get_boss_ap_token
 
-    redis-cli publish kdaemon.easy.setup.ack success
+    redis-cli SAVE
+    redis-cli PUBLISH kdaemon.easy.setup.ack success
 
     jq -rcM --null-input \
         --arg msg "$msg" \

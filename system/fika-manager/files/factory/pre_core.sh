@@ -1,17 +1,24 @@
 #!/bin/sh
 
-DEBUG=0
+. /etc/fika_manager/misc.sh
 
-my_log() {
-    level=$1 && shift
+[ -e /etc/fika-redis.conf ] || {
+    fika_log debug "[$0] cp /etc/fika-redis.conf.sample /etc/fika-redis.conf"
 
-    if [ -e /dev/log ]; then
-        logger -s -t fika-manager-recovery -p ${level} "$@"
-    else
-        echo "[fika-manager-recovery][${level}] $@"
-    fi
-
-    [ $DEBUG -eq 1 ] && echo "[fika-manager-recovery][${level}] $@" >>/tmp/factory.log
+    cp /etc/fika-redis.conf.sample /etc/fika-redis.conf
+    sync;sync
 }
 
-my_log debug "[$0] $@"
+[ -e /etc/fika_iot_gateway/config.yaml ] || {
+    fika_log debug "[$0] cp /etc/fika_iot_gateway/config.yaml.sample /etc/fika_iot_gateway/config.yaml"
+
+    cp /etc/fika_iot_gateway/config.yaml.sample /etc/fika_iot_gateway/config.yaml
+    sync;sync
+}
+
+[ -e /etc/fika_manager/config.toml ] || {
+    fika_log debug "[$0] cp /etc/fika_manager/config.toml.sample /etc/fika_manager/config.toml"
+
+    cp /etc/fika_manager/config.toml.sample /etc/fika_manager/config.toml
+    sync;sync
+}

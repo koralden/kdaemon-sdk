@@ -54,8 +54,8 @@ endef
 define FIKA_REDIS_INSTALL_TARGET_CMDS
 	$(TARGET_MAKE_ENV) $(MAKE) $(FIKA_REDIS_BUILDOPTS) -C $(@D) \
 		LDCONFIG=true install
-	$(INSTALL) -D -m 0644 package/longdong/libs/fika-redis/files/fika_redis.conf \
-		$(TARGET_DIR)/etc/fika-redis.conf
+	$(INSTALL) -D -m 0644 package/longdong/libs/fika-redis/files/fika_redis.conf.sample \
+		$(TARGET_DIR)/etc/fika-redis.conf.sample
 endef
 
 define FIKA_REDIS_INSTALL_INIT_SYSV

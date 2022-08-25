@@ -29,12 +29,12 @@ FIKA_MANAGER_MY_SCRIPT=easy_setup.sh heartbeat.sh common.sh captive-portal.sh \
 	     thirdparty/firewall.sh thirdparty/network.sh thirdparty/system.sh \
 	     factory/post_core.sh factory/post_wifi_ssid_by_uci.sh \
 	     factory/post_boss.sh factory/post_cmp.sh \
-	     factory/pre_core.sh
+	     factory/pre_core.sh factory/pre_cmp.sh
 define FIKA_MANAGER_INSTALL_MISC
 	$(INSTALL) -m 0755 -D $(FIKA_MANAGER_MY_DIR)/fika-manager.init \
 		$(TARGET_DIR)/etc/init.d/fika-manager
-	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/config.toml $(TARGET_DIR)/etc/fika_manager/config.toml
-	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/factory.toml $(TARGET_DIR)/etc/fika_manager/factory.toml
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/config.toml.sample $(TARGET_DIR)/etc/fika_manager/config.toml.sample
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/factory.toml.sample $(TARGET_DIR)/etc/fika_manager/factory.toml.sample
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_manager/factory
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_manager/thirdparty
 	for i in $(FIKA_MANAGER_MY_SCRIPT); do \

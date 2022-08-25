@@ -33,7 +33,7 @@ endef
 FIKA_IOT_GATEWAY_POST_RSYNC_HOOKS += FIKA_IOT_GATEWAY_MANUAL_PATCH
 
 FIKA_IOT_GATEWAY_MY_DIR=package/longdong/net/fika-iot-gateway/files
-FIKA_IOT_GATEWAY_MY_FILES=fika_iot_gateway.yaml MVP_000001-certificate.pem.crt MVP_000001-private.pem.key AmazonRootCA1.pem AmazonRootCA3.pem
+FIKA_IOT_GATEWAY_MY_FILES=config.yaml.sample AmazonRootCA1.pem AmazonRootCA3.pem
 define FIKA_IOT_GATEWAY_INSTALL_MISC
 	$(INSTALL) -m 0755 -D $(FIKA_IOT_GATEWAY_MY_DIR)/fika_iot_gateway.init \
 		$(TARGET_DIR)/etc/init.d/fika-iot-gateway

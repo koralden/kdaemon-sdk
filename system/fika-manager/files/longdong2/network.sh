@@ -19,14 +19,16 @@ set network.wan.username="$username"
 set network.wan.password="$password"
 set network.wan._orig_bridge=false
 set network.wan._orig_ifname=$ifname
+commit network
 EOI
-    uci commit network
 }
 
 wan_dhcp() {
     echo "longdong2 wan-dhcp $@"
-    uci set network.wan.proto=dhcp
-    uci commit network
+    uci batch <<EOI
+set network.wan.proto=dhcp
+commit network
+EOI
 }
 
 wan_wwan() {
@@ -82,6 +84,7 @@ set firewall.@zone[-1].forward=ACCEPT
 add firewall forwarding
 set firewall.@forwarding[-1].src=kguest
 set firewall.@forwarding[-1].dest=wan
+commit
 EOI
 
 #    zcfg=$(uci add firewall zone)
@@ -95,8 +98,8 @@ EOI
 #
 #set firewall.$fcfg.src=kguest
 #set firewall.$fcfg.dest=wan
+#commit
 #EOI
-    uci commit
 
 }
 
@@ -111,9 +114,8 @@ del_list dhcp.@dnsmasq[0].interface="kguest"
 delete dhcp.kguest
 $(uci show firewall | awk 'BEGIN { FS=OFS="." }
 /kguest/ { if (map[$2] != 1) { print "delete firewall."$2; map[$2]=1 } }')
+commit
 EOI
-
-    uci commit
 }
 
 wlan_private() {
@@ -129,8 +131,8 @@ set wireless.ssid0.encryption='psk-mixed+tkip+ccmp'
 set wireless.ssid0.key="$password"
 set wireless.ssid4.encryption='psk-mixed+tkip+ccmp'
 set wireless.ssid4.key="$password"
+commit wireless
 EOI
-    uci commit wireless
 }
 
 network_apply() {

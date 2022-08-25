@@ -1,28 +1,15 @@
 #!/bin/sh
 
-DEBUG=0
-
-my_log() {
-    level=$1 && shift
-
-    if [ -e /dev/log ]; then
-        logger -s -t fika-manager-recovery -p ${level} "$@"
-    else
-        echo "[fika-manager-recovery][${level}] $@"
-    fi
-
-    [ $DEBUG -eq 1 ] && echo "[fika-manager-recovery][${level}] $@" >>/tmp/factory.log
-}
+. /etc/fika_manager/misc.sh
+. /lib/functions.sh
 
 # TODO, data unsync if fika-ez => origin setup, sync until reboot
 # maybe remove redis/cache and always call this script every time
 
-my_log debug "[$0] $@"
+fika_log debug "[$0] $@"
 
 json=$1 && shift
 key=$1 && shift
-
-. /lib/functions.sh
 
 config_load network
 #local wan_type wan_username wan_password wifi_ssid wifi_password password_overwrite proto

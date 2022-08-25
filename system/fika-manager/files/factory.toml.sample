@@ -36,6 +36,7 @@ ap_hcs_path = "v0/ap/hcs"
 ap_info_path = "v0/ap/info"
 
 [cmp]
+pre="/etc/fika_manager/factory/pre_cmp.sh"
 post="/etc/fika_manager/factory/post_cmp.sh"
 key = "kap.cmp"
 [cmp.cfg]

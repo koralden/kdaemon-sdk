@@ -27,7 +27,9 @@ main() {
     provision_nickname_update
 
     [ $code -eq 200 ] && network_apply
-    redis-cli publish kap.por.config.ack success
+
+    redis-cli SAVE
+    redis-cli PUBLISH kap.por.config.ack success
 
     jq -rcM --null-input \
         --arg msg "$msg" \

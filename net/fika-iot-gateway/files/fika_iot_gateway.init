@@ -5,7 +5,7 @@ START=97
 STOP=10
 
 FIKA_GW_BIN="/usr/bin/fika_iot_gateway"
-FIKA_GW_CONFIG="/etc/fika_iot_gateway/fika_iot_gateway.yaml"
+FIKA_GW_CONFIG="/etc/fika_iot_gateway/config.yaml"
 FIKA_GW_PID="/var/run/fika_iot_gateway.pid"
 FIKA_GW_DATA="/var/lib/fika_iot_gateway"
 
