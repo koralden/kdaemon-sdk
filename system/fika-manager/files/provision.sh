@@ -19,7 +19,7 @@ boss_owner_info() {
     code=$(echo $info | jq -r .code)
     if [ "X$code" = "X200" ]; then
         wallet=$(echo $info | jq -r .data.user_wallet)
-        redis-cli SET kap.boss.owner.wallet $wallet 2>&1 >/dev/null
+        redis-cli SET kap.boss.ap.info $(echo $info | jq -rcM .data) 2>&1 >/dev/null
         echo $wallet
         return 0
     else
@@ -47,7 +47,7 @@ provision_main() {
 check_owner() {
     local wallet payload
 
-    wallet=$(redis-cli GET kap.boss.owner.wallet)
+    wallet=$(redis-cli GET kap.boss.ap.info | jq -r .user_wallet)
 
     [ -n "$wallet" ] && return 0
 

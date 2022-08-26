@@ -45,7 +45,7 @@ use tracing::{debug, info /*, error*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fika_easy_setup::fas;
-use fika_easy_setup::kap_boss::BossMenu;
+use fika_easy_setup::kap_boss::{BossMenu, BossApInfoData};
 use fika_easy_setup::kap_core::CoreMenu;
 
 #[derive(Parser, Debug, Clone)]
@@ -117,6 +117,7 @@ static COOKIE_NAME: &str = "SESSION";
 static API_PATH_SETUP_EASY: &str = "/setup/easy";
 static API_PATH_AUTH_SIMPLE: &str = "/auth/simple";
 static API_PATH_PAIRING: &str = "/pairing";
+static API_PATH_PAIRING_STATUS: &str = "/pairing/status";
 static API_PATH_SHOW_EMOJI: &str = "/show/emoji";
 static API_PATH_LOGOUT: &str = "/logout";
 static API_PATH_SYSTEM_CHECKING: &str = "/system/checking";
@@ -225,7 +226,8 @@ async fn private_service(mut opt: Opt) {
             API_PATH_AUTH_SIMPLE,
             get(show_simple_auth).post(do_simple_auth),
         )
-        .route(API_PATH_PAIRING, get(show_pairing).post(create_pairing))
+        .route(API_PATH_PAIRING, get(show_pairing)/*.post(create_pairing)*/)
+        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status))
         .route(
             API_PATH_SETUP_EASY,
             get(show_network_setup).post(update_network_setup),
@@ -889,13 +891,13 @@ async fn show_pairing(
     .into_response()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/*#[derive(Debug, Serialize, Deserialize, Clone)]
 struct PairingCfg {
     otp: String,
 }
 
 // Valid user session required. If there is none, redirect to the auth page
-async fn create_pairing(
+async fn _create_pairing(
     user: Option<SimpleUser>,
     Json(input): Json<PairingCfg>,
     Extension(cache): Extension<redis::Client>,
@@ -908,9 +910,7 @@ async fn create_pairing(
     dbg!(&input);
     let mut conn = cache.get_async_connection().await.unwrap();
 
-    /* input.otp need check or frondend check? */
     let otp = input.otp;
-    /* check if have got otp from nms(<-cmp) */
     if let Ok(saved_otp) = conn.get::<&str, String>("nms.pairing.otp").await {
         if saved_otp == otp {
             return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
@@ -934,7 +934,6 @@ async fn create_pairing(
     sub_conn.subscribe("nms.pairing.status").await.unwrap();
     let mut sub_stream = sub_conn.on_message();
 
-    /*TODO, ui/ux display progress for this long-term job */
     let resp = tokio::select! {
         Some(res) = sub_stream.next() => {
             match res.get_payload::<String>() {
@@ -955,6 +954,43 @@ async fn create_pairing(
     get_result_emoji(&format!("Pairing {}", resp), &resp)
         .await
         .into_response()
+}*/
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct PairingStatus {
+    code: u16,
+    paired: bool,
+    owner_wallet: Option<String>,
+    ap_wallet: Option<String>,
+}
+
+async fn get_pairing_status(
+    Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
+) -> impl IntoResponse {
+    let mut status = PairingStatus {
+        code: 500, /* StatusCode::INTERNAL_SERVER_ERROR */
+        paired: false,
+        owner_wallet: None,
+        ap_wallet: Some(server_ctx.wallet.clone()),
+    };
+
+    if let Ok(mut db_conn) = cache.get_async_connection().await {
+        let ap_info = db_conn
+            .get::<&str, String>("kap.boss.ap.info")
+            .await
+            .or(Err("kap.boss.ap.info not found"))
+            .and_then(|s| serde_json::from_str::<BossApInfoData>(&s).or(Err("json convert fail")));
+
+        if let Ok(ap_info) = ap_info {
+            status.code = 200;
+            status.paired = if ap_info.user_wallet.is_none() { false } else { true };
+            status.owner_wallet = ap_info.user_wallet;
+        } else {
+            status.code = 200;
+        }
+    }
+    (StatusCode::OK, Json(status))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
