@@ -965,17 +965,22 @@ struct PairingStatus {
 }
 
 async fn get_pairing_status(
-    Extension(cache): Extension<redis::Client>,
+    //Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     let mut status = PairingStatus {
-        code: 500, /* StatusCode::INTERNAL_SERVER_ERROR */
+        code: 200, /* StatusCode::INTERNAL_SERVER_ERROR */
         paired: false,
         owner_wallet: None,
         ap_wallet: Some(server_ctx.wallet.clone()),
     };
+    let owner = server_ctx.get_boss_owner().await;
+    if owner.is_ok() {
+        status.paired = true;
+        status.owner_wallet = Some(owner.unwrap());
+    }
 
-    if let Ok(mut db_conn) = cache.get_async_connection().await {
+    /*if let Ok(mut db_conn) = cache.get_async_connection().await {
         let ap_info = db_conn
             .get::<&str, String>("kap.boss.ap.info")
             .await
@@ -989,7 +994,7 @@ async fn get_pairing_status(
         } else {
             status.code = 200;
         }
-    }
+    }*/
     (StatusCode::OK, Json(status))
 }
 

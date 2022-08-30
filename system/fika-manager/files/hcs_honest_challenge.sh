@@ -29,12 +29,12 @@ db_fetch() {
     apHcsPath=$(echo $kap_boss | jq -r .ap_hcs_path)
     kapWallet=$(echo $kap_core | jq -r .wallet_address)
     accesstokenAp=$(redis-cli --raw GET kap.boss.ap.token)
-    apHcsPath=$(echo $kap_boss | jq -r .ap_info_path)
+    apInfoPath=$(echo $kap_boss | jq -r .ap_info_path)
 
-    apTokenPath=${apTokenPath:-"v0/ap/ap_token"}
-    hcsPath=${hcsPath:-"v0/hcs/pair"}
-    apHcsPath=${apHcsPath:-"v0/ap/hcs"}
-    apInfoPath=${apInfoPath:-"v0/ap/info"}
+    [ -z "$apTokenPath" -o "$apTokenPath" = "null" ] && apTokenPath="v0/ap/ap_token"
+    [ -z "$hcsPath" -o "$hcsPath" = "null" ] && hcsPath="v0/hcs/pair"
+    [ -z "$apHcsPath" -o "$apHcsPath" = "null" ] && apHcsPath="v0/ap/hcs"
+    [ -z "$apInfoPath" -o "$apInfoPath" = "null" ] && apInfoPath="v0/ap/info"
 
     fika_log debug "appUrl: $rootUrl kapWallet: $kapWallet accesstoken: $accesstoken accesstokenAp: $accesstokenAp"
 
