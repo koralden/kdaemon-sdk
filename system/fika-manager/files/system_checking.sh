@@ -16,13 +16,8 @@ check_boss_ap_token() {
     get_boss_ap_token
 }
 
-check_owner() {
-    /etc/fika_manager/provision.sh check-owner
-}
-
 #check_ntp
 #check_boss_ap_token
-#check_owner
 
 payload=$(jq -rcM --null-input \
     --argjson code "$code" \

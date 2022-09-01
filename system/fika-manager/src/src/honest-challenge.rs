@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[clap(
     name = "fika-honest-challenge",
     about = "FIKA Honest Challenge",
-    version = "0.0.1",
+    version = "0.0.1"
 )]
 struct Opt {
     #[clap(short = 's', long = "timestamp")]
@@ -29,32 +29,32 @@ struct Opt {
     rfc3339: bool,
 }
 
-#[instrument(name = "timestamp", )]
+#[instrument(name = "timestamp")]
 async fn do_timestamp(t: DateTime<Utc>) -> Result<()> {
     debug!("DateTime - {:?} to Timestamp - {}", t, t.timestamp());
     println!("{}", t.timestamp());
     Ok(())
 }
 
-#[instrument(name = "rfc3339", )]
+#[instrument(name = "rfc3339")]
 async fn do_rfc3339() -> Result<()> {
     let now = Utc::now();
     println!("{}", now.to_rfc3339_opts(SecondsFormat::Secs, false));
     Ok(())
 }
 
-#[instrument(name = "cron", )]
+#[instrument(name = "cron")]
 async fn do_cron(p: PathBuf) -> Result<()> {
     unimplemented!()
 }
 
-#[instrument(name = "task", )]
+#[instrument(name = "task")]
 async fn do_tasks(cron: Option<PathBuf>) -> Result<()> {
     unimplemented!()
 }
 
 //pub type MyError = Box<dyn std::error::Error + Send + Sync>;
-fn set_up_logging(log_level: &str) -> Result<()/*, MyError*/> {
+fn set_up_logging(log_level: &str) -> Result<() /*, MyError*/> {
     // See https://docs.rs/tracing for more info
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(

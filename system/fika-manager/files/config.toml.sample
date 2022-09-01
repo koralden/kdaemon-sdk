@@ -8,6 +8,26 @@ ok_cycle = {secs = 13, nanos = 0 }
 fail_cycle = {secs = 301, nanos = 0 }
 path = "/etc/fika_manager/boss_token.sh"
 
+[aws]
+endpoint = "a2dl0okey4lms3-ats.iot.ap-northeast-1.amazonaws.com"
+
+[aws.provision]
+ca = "/userdata/AmazonRootCA1.pem"
+cert = "/userdata/provisioning-claim.certificate.pem"
+key = "/userdata/provisioning-claim.private-key.pem"
+template = "FleetProvisioningMacPostfixTemplate"
+thing_prefix = "LD2"
+mac_address = "00037fad4e32"
+serial_number = "000000000001"
+sku = "TW"
+
+[aws.dedicated]
+#thing_name = "LD2_00037fad4e32"
+ca = "/userdata/AmazonRootCA1.pem"
+cert = "/userdata/dedicated.certificate.pem"
+key = "/userdata/dedicated.private-key.pem"
+pull_topic = [ "name/ap-info", "name/remote-manage", "name/honest-challenge", "name/pairing" "name/captive-portal" ]
+
 [[subscribe]]
 topic = "kdaemon.easy.setup"
 path = "/etc/fika_manager/easy_setup.sh"
@@ -21,11 +41,15 @@ topic = "captive-portal"
 path = "/etc/fika_manager/captive-portal.sh"
 
 [[subscribe]]
-topic = "nms.shadow.delta.remote-manage"
-path = "/etc/fika_manager/nms_remote_manage.sh"
+topic = "aws/kap/shadow/name/ap-info/state"
+path = "/etc/fika_manager/cmp_ap_info.sh"
 
 #[[subscribe]]
-#topic = "nms.shadow.delta.pairing"
+#topic = "aws/kap/shadow/name/remote-manage/state"
+#path = "/etc/fika_manager/cmp_remote_manage.sh"
+
+#[[subscribe]]
+#topic = "aws/kap/shadow/name/pairing/state"
 #path = "/etc/fika_manager/cmp_pairing.sh"
 
 [[subscribe]]
@@ -33,26 +57,26 @@ topic = "boss.honest.challenger"
 path = "/etc/fika_manager/hcs_honest_challenge.sh"
 
 [[task]]
-topic = "nms.shadow.update.provision"
+topic = "kap/aws/shadow/name/provision"
 start_at = {secs = 3, nanos = 0 }
 path = "/etc/fika_manager/provision.sh"
 db_publish = true
 
 [[task]]
-topic = "nms.shadow.update.heartbeat"
+topic = "kap/aws/shadow/name/heartbeat"
 period = {secs = 295, nanos = 0 }
 path = "/etc/fika_manager/heartbeat.sh"
 db_publish = true
 
 #[[task]]
-#topic = "nms.shadow.update.runtime-statistics"
+#topic = "kap/aws/shadow/name/runtime-statistics"
 #start_at = {secs = 30, nanos = 0 }
 #period = {secs = 600, nanos = 0 }
 #path = "/etc/fika_manager/runtime_statistics.sh"
 #db_publish = true
 #
 #[[task]]
-#topic = "nms.shadow.update.maker"
+#topic = "kap/aws/shadow/name/maker"
 #start_at = {secs = 10, nanos = 0 }
 #path = "/etc/fika_manager/maker.sh"
 #db_publish = true

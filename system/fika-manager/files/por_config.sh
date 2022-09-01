@@ -1,15 +1,10 @@
 #!/bin/sh
 
 . /etc/fika_manager/common.sh
+. /etc/fika_manager/provision.sh library
 
 msg=""
 code=404
-
-provision_nickname_update() {
-    payload=$(/etc/fika_manager/provision.sh)
-    fika_log debug "try to publish nms.shadow.update.provision $payload ..."
-    echo $payload | jq -c && redis-cli PUBLISH "nms.shadow.update.provision" $payload
-}
 
 main() {
     cfg=$1 && shift
@@ -24,7 +19,7 @@ main() {
     fi
 
     #XXX update nickname via CMP/provistion
-    provision_nickname_update
+    provision_sync_aws
 
     [ $code -eq 200 ] && network_apply
 

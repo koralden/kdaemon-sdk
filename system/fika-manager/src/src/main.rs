@@ -7,7 +7,7 @@ use tokio::fs;
 use tokio::signal;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::time::{self, Duration, Instant};
-use tracing::{debug, error, info, warn, instrument};
+use tracing::{debug, error, info, instrument, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 //use bytes::Bytes;
 use std::iter::repeat_with;
@@ -16,14 +16,20 @@ use std::iter::repeat_with;
 use process_stream::{Process, ProcessItem, Stream, StreamExt};
 use std::collections::{BTreeMap, HashMap};
 //use std::io;
-use std::path::PathBuf;
 use chrono::prelude::*;
+use std::path::PathBuf;
+mod aws_iot;
+use crate::aws_iot::{
+    mqtt_dedicated_create, mqtt_dedicated_create_start, mqtt_dedicated_start, mqtt_provision_task,
+    AwsIotDedicatedConfig, AwsIotProvisionConfig,
+};
+use fika_manager::{publish_message, set_message, DbCommand};
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
     name = "fika-manager",
     about = "FIKA manager to interactive with platform",
-    version = "0.0.2",
+    version = "0.0.2"
 )]
 struct Opt {
     #[clap(
@@ -32,6 +38,8 @@ struct Opt {
         default_value = "/etc/fika_manager/config.toml"
     )]
     config: String,
+    #[clap(long = "log-level", default_value = "info")]
+    log_level: String,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -41,6 +49,7 @@ struct Config {
     subscribe: Option<Vec<ConfigSubscribe>>,
     task: Option<Vec<ConfigTask>>,
     honest: Option<HonestConfig>,
+    aws: Option<AwsIotConfig>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -74,8 +83,16 @@ struct HonestConfig {
     ok_cycle: Duration,
     fail_cycle: Duration,
     path: PathBuf,
+    disable: Option<bool>,
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+struct AwsIotConfig {
+    endpoint: String,
+    provision: Option<AwsIotProvisionConfig>,
+    dedicated: Option<AwsIotDedicatedConfig>,
+}
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -85,34 +102,9 @@ struct State {
     cfg: Config,
 }
 
-#[derive(Debug)]
-#[allow(dead_code)]
-enum Command {
-    Get {
-        key: String,
-        resp: oneshot::Sender<Option<String>>,
-    },
-    Set {
-        key: String,
-        val: String, //TODO Bytes
-        resp: oneshot::Sender<Option<String>>,
-    },
-    Publish {
-        key: String,
-        val: String,
-        resp: oneshot::Sender<Option<usize>>,
-        //resp: mpsc::Sender<Option<String>>,
-    },
-    Lindex {
-        key: String,
-        idx: isize,
-        resp: oneshot::Sender<Option<String>>,
-    },
-}
-
 async fn conn_access_task(
     mut conn: redis::aio::Connection,
-    mut chan_rx: mpsc::Receiver<Command>,
+    mut chan_rx: mpsc::Receiver<DbCommand>,
     _shared: Arc<Mutex<State>>,
 ) -> Result<()> {
     /*loop {
@@ -120,25 +112,34 @@ async fn conn_access_task(
     }*/
     while let Some(cmd) = chan_rx.recv().await {
         match cmd {
-            Command::Get { key, resp } => {
+            DbCommand::Get { key, resp } => {
                 let value: Option<String> = conn.get(key).await.ok();
                 //info!("[conn_access_task]: todo {}", value);
                 let _ = resp.send(value);
             }
-            Command::Set { key, val, resp } => {
+            DbCommand::Set { key, val, resp } => {
                 let ret: Option<String> = conn.set(key, val).await.ok();
                 //debug!("[conn_access_task]: todo {}", ret);
                 let _ = resp.send(ret);
             }
-            Command::Publish { key, val, resp } => {
+            DbCommand::Publish { key, val, resp } => {
                 let ret: Option<usize> = conn.publish(key, val).await.ok();
                 //debug!("[conn_access_task]: todo {}", ret);
                 let _ = resp.send(ret);
             }
-            Command::Lindex { key, idx, resp } => {
+            DbCommand::Lindex { key, idx, resp } => {
                 let value: Option<String> = conn.lindex(key, idx).await.ok();
                 //info!("[conn_access_task]: todo {}", value);
                 let _ = resp.send(value);
+            }
+            DbCommand::Rpush { key, val, limit } => {
+                if let Ok(len) = conn.rpush::<&str, String, usize>(&key, val).await {
+                    if len == limit {
+                        if let Err(e) = conn.lpop::<&str, String>(&key, None).await {
+                            return Err(anyhow!("DB RPUSH/LPOP fail - {:?}", e));
+                        }
+                    }
+                }
             }
         }
     }
@@ -149,7 +150,7 @@ async fn conn_access_task(
 #[instrument(skip(sub_conn, shared))]
 async fn subscribe_task(
     mut sub_conn: redis::aio::PubSub,
-    _chan_tx: mpsc::Sender<Command>,
+    _chan_tx: mpsc::Sender<DbCommand>,
     shared: Arc<Mutex<State>>,
 ) -> Result<()> {
     let subscribe;
@@ -206,71 +207,35 @@ async fn subscribe_task(
     Ok(())
 }
 
-type ExpirationT = BTreeMap<(Instant, u64), (String, Option<Duration>)>;
+type ExpirationT = BTreeMap<(Instant, u64), (String, Option<Duration>, bool)>;
 
 fn next_topics(expirations: Arc<Mutex<ExpirationT>>) -> Option<(Instant, String)> {
     let mut expirations = expirations.lock().unwrap();
 
     let expirations = &mut *expirations;
     let now = Instant::now();
-    while let Some((&(when, id), (topic, _))) = expirations.iter().next() {
-        /* TODO equal case to cover the same start time */
+
+    while let Some((&(when, id), (topic, _, _))) = expirations.iter().next() {
         if when >= now {
-            return Some((when, topic.to_string()));
+            let topic = topic.clone();
+            expirations
+                .entry((when, id))
+                .and_modify(|curr| (*curr).2 = true);
+            return Some((when, topic));
         } else {
-            if let Some((topic, Some(period))) = expirations.remove(&(when, id)) {
-                let when = now + period;
-                expirations.insert((when, id), (topic, Some(period)));
+            if let Some((topic, Some(period), scheduled)) = expirations.remove(&(when, id)) {
+                /* same period time case, return it to force run */
+                if when < now && scheduled == false {
+                    expirations.insert((when, id), (topic.clone(), Some(period), true));
+                    return Some((now, topic));
+                } else {
+                    let next = now + period;
+                    expirations.insert((next, id), (topic, Some(period), false));
+                }
             }
         }
     }
     None
-}
-
-#[instrument(skip(chan_tx))]
-async fn publish_message(
-    chan_tx: mpsc::Sender<Command>,
-    topic: String,
-    payload: String,
-) -> Result<()> {
-    let (resp_tx, resp_rx) = oneshot::channel();
-
-    chan_tx
-        .send(Command::Publish {
-            key: topic.clone(),
-            val: payload,
-            resp: resp_tx,
-        })
-        .await?;
-
-    let res = resp_rx.await;
-    debug!(
-        "[publish_task][publish][{}] transmit response {:?}",
-        topic, res
-    );
-
-    Ok(())
-}
-
-#[instrument(skip(chan_tx))]
-async fn set_message(chan_tx: mpsc::Sender<Command>, topic: String, payload: String) -> Result<()> {
-    let (resp_tx, resp_rx) = oneshot::channel();
-
-    chan_tx
-        .send(Command::Set {
-            key: topic.clone(),
-            val: payload,
-            resp: resp_tx,
-        })
-        .await?;
-
-    let res = resp_rx.await;
-    debug!(
-        "[publish_task][publish][{}] transmit response {:?}",
-        topic, res
-    );
-
-    Ok(())
 }
 
 #[instrument(skip(process_stream))]
@@ -310,13 +275,17 @@ async fn capture_process_stream(
 }
 
 fn spawn_task_run_path_publish(
-    chan_tx: mpsc::Sender<Command>,
+    chan_tx: mpsc::Sender<DbCommand>,
     topic: String,
     path: PathBuf,
     timeout: Option<Duration>,
     db_publish: Option<bool>,
     db_set: Option<bool>,
 ) -> Result<tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
+    info!(
+        "spawn task run {:?} with topic {:?}/{:?}",
+        &path, &topic, timeout
+    );
     let mut process = Process::new(&path);
     match process.spawn_and_stream() {
         Ok(process_stream) => {
@@ -330,7 +299,7 @@ fn spawn_task_run_path_publish(
                         match out {
                             Ok(payload) => {
                                 if db_publish.is_some() {
-                                    publish_message(chan_tx.clone(), topic.clone(), payload.clone()).await?;
+                                    publish_message(&chan_tx, topic.clone(), payload.clone()).await?;
                                 }
                                 if db_set.is_some() {
                                     set_message(chan_tx, topic, payload).await?;
@@ -353,7 +322,7 @@ fn spawn_task_run_path_publish(
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
             });
             Ok(job)
-        },
+        }
         Err(e) => Err(anyhow!(e)),
     }
 }
@@ -363,7 +332,7 @@ fn spawn_task_run_path_publish(
     name = "publish::task",
     skip(chan_tx, shared),
 )]
-async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) -> Result<()> {
+async fn publish_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>) -> Result<()> {
     let mut entries: HashMap<
         String,
         (
@@ -399,7 +368,7 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                     (when, id),
                     (topic, period)
                 );
-                expirations.insert((when, id), (topic.to_string(), *period));
+                expirations.insert((when, id), (topic.to_string(), *period, false));
                 id = id + 1;
             }
             None => {
@@ -415,7 +384,7 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
                         (when, id),
                         (topic, period)
                     );
-                    expirations.insert((when, id), (topic.to_string(), Some(period)));
+                    expirations.insert((when, id), (topic.to_string(), Some(period), false));
                     id = id + 1;
                 } else {
                     /* run immediately */
@@ -454,7 +423,7 @@ async fn publish_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>)
 }
 
 #[allow(dead_code)]
-async fn test_task(chan_tx: mpsc::Sender<Command>, _shared: Arc<Mutex<State>>) -> Result<()> {
+async fn test_task(chan_tx: mpsc::Sender<DbCommand>, _shared: Arc<Mutex<State>>) -> Result<()> {
     loop {
         let v = vec![1, 2, 3];
         let i = fastrand::usize(..v.len());
@@ -464,7 +433,7 @@ async fn test_task(chan_tx: mpsc::Sender<Command>, _shared: Arc<Mutex<State>>) -
             let (resp_tx, resp_rx) = oneshot::channel();
 
             chan_tx
-                .send(Command::Set {
+                .send(DbCommand::Set {
                     key: String::from("test"),
                     val: repeat_with(fastrand::alphanumeric).take(10).collect(),
                     resp: resp_tx,
@@ -478,7 +447,7 @@ async fn test_task(chan_tx: mpsc::Sender<Command>, _shared: Arc<Mutex<State>>) -
             let (resp_tx, resp_rx) = oneshot::channel();
 
             chan_tx
-                .send(Command::Get {
+                .send(DbCommand::Get {
                     key: String::from("test"),
                     resp: resp_tx,
                 })
@@ -490,7 +459,7 @@ async fn test_task(chan_tx: mpsc::Sender<Command>, _shared: Arc<Mutex<State>>) -
             let (resp_tx, resp_rx) = oneshot::channel();
 
             chan_tx
-                .send(Command::Publish {
+                .send(DbCommand::Publish {
                     key: String::from("hello"),
                     val: String::from("gggg"),
                     resp: resp_tx,
@@ -521,9 +490,9 @@ fn set_up_logging(log_level: &str) -> Result<(), MyError> {
 
 #[tokio::main]
 async fn main() -> Result<(), MyError> {
-    set_up_logging("debug")?;
-
     let opt = Opt::parse();
+
+    set_up_logging(&opt.log_level)?;
 
     //debug!("config as {}", opt.config);
 
@@ -531,7 +500,7 @@ async fn main() -> Result<(), MyError> {
     let cfg: Config = toml::from_str(&cfg)?;
     //debug!("cfg content as {:#?}", cfg);
 
-    let (chan_tx, chan_rx) = mpsc::channel::<Command>(32);
+    let (chan_tx, chan_rx) = mpsc::channel::<DbCommand>(32);
     //let url: &str = &cfg.core.database;
     let cache = redis::Client::open(&*cfg.core.database)?;
     let shared = Arc::new(Mutex::new(State {
@@ -554,15 +523,20 @@ async fn main() -> Result<(), MyError> {
     ));
     let _pub_task = tokio::spawn(publish_task(chan_tx.clone(), shared.clone()));
     let _cron_task = tokio::spawn(honest_task(chan_tx.clone(), shared.clone()));
+    let _mqtt_task = tokio::spawn(mqtt_task(
+        cache.get_async_connection().await?.into_pubsub(),
+        chan_tx.clone(),
+        shared.clone(),
+    ));
 
     let future_sig_c = signal::ctrl_c();
 
-    //tokio::join!();
     tokio::select! {
         _ = future_sig_c => {
             info!("exit by catch signal-c");
         }
     }
+    //graceful shudown? tokio::join!();
 
     Ok(())
 }
@@ -580,18 +554,26 @@ struct BossHcsPair {
     name = "honest::task",
     skip(chan_tx, shared),
 )]
-async fn honest_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) {
+async fn honest_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>) {
     let key_hcs_list = "boss.hcs.token.list";
     let mut fail_cycle = Duration::from_secs(10);
     let mut ok_cycle = Duration::from_secs(10);
     let mut cmd_path = PathBuf::from("/etc/fika_manager/boss_token.sh");
+    let mut disable = false;
     if let Ok(state) = shared.lock() {
         if let Some(honest) = &state.cfg.honest {
             fail_cycle = honest.fail_cycle;
             ok_cycle = honest.ok_cycle;
             cmd_path = honest.path.clone();
+            disable = honest.disable.unwrap_or_else(|| false);
         }
     }
+
+    if disable == true {
+        info!("internal honest task disable");
+        return;
+    }
+
     let mut when = Instant::now() + ok_cycle;
 
     loop {
@@ -610,7 +592,7 @@ async fn honest_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) 
                     debug!("job {:?} completed", &cmd_path);
 
                     let (resp_tx, resp_rx) = oneshot::channel();
-                    if let Ok(_) = chan_tx.send(Command::Lindex {
+                    if let Ok(_) = chan_tx.send(DbCommand::Lindex {
                         key: String::from(key_hcs_list),
                         idx: 0,
                         resp: resp_tx,
@@ -636,5 +618,104 @@ async fn honest_task(chan_tx: mpsc::Sender<Command>, shared: Arc<Mutex<State>>) 
                 error!("Otherwise rollback refresh cycle at {:?}", when);
             }
         }
+    }
+}
+
+#[instrument(name = "mqtt::task", skip(sub_conn, db_chan, shared))]
+async fn mqtt_task(
+    sub_conn: redis::aio::PubSub,
+    db_chan: mpsc::Sender<DbCommand>,
+    shared: Arc<Mutex<State>>,
+) {
+    if let Ok(state) = shared.lock() {
+        debug!("aws-iot-config {:?}", state.cfg.aws);
+    }
+
+    let cfg: Option<AwsIotConfig> = if let Ok(mut state) = shared.lock() {
+        state.cfg.aws.take()
+    } else {
+        None
+    };
+
+    if let Some(cfg) = cfg {
+        match (cfg.dedicated, cfg.provision) {
+            (Some(mut dedicated), Some(provision)) => {
+                let _ = dedicated.apply_thing_name(provision.generate_thing_name(None));
+                match mqtt_dedicated_create(&cfg.endpoint, &dedicated).await {
+                    Err(_) => {
+                        match mqtt_provision_task(
+                            &cfg.endpoint,
+                            provision,
+                            Some(dedicated),
+                            db_chan.clone(),
+                        )
+                        .await
+                        {
+                            Ok(dedicated) => {
+                                let db_chan = db_chan.clone();
+                                if let Err(e) = mqtt_dedicated_create_start(
+                                    &cfg.endpoint,
+                                    &dedicated,
+                                    sub_conn,
+                                    db_chan,
+                                )
+                                .await
+                                {
+                                    error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("MQTT provision function(from dedicated) not work - {:?}", e)
+                            }
+                        }
+                    }
+                    Ok(iot) => {
+                        let thing_name = dedicated.thing_name.as_ref().unwrap();
+                        if mqtt_dedicated_start(
+                            sub_conn,
+                            db_chan.clone(),
+                            thing_name.clone(),
+                            iot,
+                            dedicated.pull_topic,
+                        )
+                        .await
+                        .is_ok()
+                        {
+                            info!("MQTT dedicated function work Ok");
+                        } else {
+                            error!("MQTT dedicated function work fail");
+                        }
+                    }
+                }
+            }
+            (None, Some(provision)) => {
+                let thing_name = provision.generate_thing_name(None);
+                match mqtt_provision_task(&cfg.endpoint, provision, None, db_chan.clone()).await {
+                    Ok(mut dedicated) => {
+                        let _ = dedicated.apply_thing_name(thing_name);
+                        let db_chan = db_chan.clone();
+                        if let Err(e) = mqtt_dedicated_create_start(
+                            &cfg.endpoint,
+                            &dedicated,
+                            sub_conn,
+                            db_chan,
+                        )
+                        .await
+                        {
+                            error!(
+                                "MQTT 1nd dedicated function(from provision) not work - {:?}",
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => error!("MQTT provision function not work - {:?}", e),
+                }
+            }
+            (_, _) => {
+                debug!("MQTT config not satisfy, omit");
+            }
+        }
+    } else {
+        debug!("MQTT config lost, omit");
     }
 }

@@ -26,5 +26,5 @@ feedback=$(jq -rcM --null-input \
     --argjson code "$code" \
     '{ "message": $msg, "code": $code }')
 
-redis-cli publish nms.shadow.update.remote-manage "$feedback"
+redis-cli publish kap/aws/shadow/name/remote-manage "$feedback"
 echo $feedback

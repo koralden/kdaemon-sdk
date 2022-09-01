@@ -8,7 +8,7 @@
 //! CLIENT_ID=REPLACE_ME CLIENT_SECRET=REPLACE_ME cargo run -p example-oauth
 //! ```
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_session::{MemoryStore, Session, SessionStore};
 use axum::{
     async_trait,
@@ -34,25 +34,25 @@ use qrcode::QrCode;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::iter::repeat_with;
 use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
-use std::collections::HashMap;
 use tokio::time::{self, Duration};
 use tracing::{debug, info /*, error*/};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fika_easy_setup::fas;
-use fika_easy_setup::kap_boss::{BossMenu, BossApInfoData};
+use fika_easy_setup::kap_boss::{BossApInfoData, BossMenu};
 use fika_easy_setup::kap_core::CoreMenu;
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.2",
+    version = "0.0.2"
 )]
 struct Opt {
     /// set the listen addr
@@ -251,9 +251,7 @@ async fn private_service(mut opt: Opt) {
 
     match (opt.certificate, opt.private_key) {
         (Some(ref cert), Some(ref pkey)) => {
-            let config = RustlsConfig::from_pem_file(cert, pkey)
-                .await
-                .unwrap();
+            let config = RustlsConfig::from_pem_file(cert, pkey).await.unwrap();
 
             tracing::info!("listening on https://{} for private", addr);
 
@@ -261,14 +259,14 @@ async fn private_service(mut opt: Opt) {
                 .serve(app.into_make_service())
                 .await
                 .unwrap();
-        },
+        }
         (_, _) => {
             tracing::info!("listening on http://{} for private", addr);
             axum::Server::bind(&addr)
                 .serve(app.into_make_service())
                 .await
                 .unwrap();
-        },
+        }
     }
 }
 
@@ -311,9 +309,7 @@ async fn public_service(
 
     match (cert, private_key) {
         (Some(ref cert), Some(ref pkey)) => {
-            let config = RustlsConfig::from_pem_file(cert, pkey)
-                .await
-                .unwrap();
+            let config = RustlsConfig::from_pem_file(cert, pkey).await.unwrap();
 
             tracing::info!("listening on https://{} for public", addr);
 
@@ -321,15 +317,12 @@ async fn public_service(
                 .serve(app)
                 .await
                 .unwrap();
-        },
+        }
         (_, _) => {
             tracing::info!("listening on http://{} for public", addr);
 
-            axum::Server::bind(&addr)
-                .serve(app)
-                .await
-                .unwrap();
-        },
+            axum::Server::bind(&addr).serve(app).await.unwrap();
+        }
     }
 }
 
@@ -712,7 +705,28 @@ impl ServerCtx {
           }*/
     }
 
-    async fn get_boss_owner(&self) -> Result<String> {
+    async fn db_boss_owner(&self, mut conn: redis::aio::Connection) -> Result<BossApInfoData> {
+        /* updted via MQTT/subscribe in fika-manager */
+        conn.get::<&str, String>("kap.boss.ap.info")
+            .await
+            .or(Err(anyhow!("kap.boss.ap.info not found")))
+            .and_then(|s| {
+                serde_json::from_str::<BossApInfoData>(&s).or(Err(anyhow!("json convert fail")))
+            })
+    }
+
+    async fn get_boss_owner(&self, conn: Result<redis::aio::Connection>) -> Result<String> {
+        if let Ok(conn) = conn {
+            if let Ok(info) = self.db_boss_owner(conn).await {
+                //return info.user_wallet
+                //    .ok_or(anyhow!("user-wallet non-exist"));
+                if info.user_wallet.is_some() {
+                    return Ok(info.user_wallet.unwrap());
+                }
+            }
+        }
+
+        /* trandition BOSS/polling flow */
         let url = format!("{}/{}", &self.api_url, &self.ap_info_path);
 
         let mut map = HashMap::new();
@@ -735,14 +749,18 @@ impl ServerCtx {
         match serde_json::from_value::<u16>(response["code"].take()) {
             Ok(code) => {
                 if code == 200 {
-                    Ok(serde_json::from_value::<String>(response["data"]["user_wallet"].take()).unwrap())
+                    Ok(
+                        serde_json::from_value::<String>(response["data"]["user_wallet"].take())
+                            .unwrap(),
+                    )
                 } else {
-                    Err(anyhow::anyhow!(serde_json::from_value::<String>(response["message"].take()).unwrap()))
+                    Err(anyhow::anyhow!(serde_json::from_value::<String>(
+                        response["message"].take()
+                    )
+                    .unwrap()))
                 }
-            },
-            _ => {
-                Err(anyhow::anyhow!("unknown error".to_owned()))
             }
+            _ => Err(anyhow::anyhow!("unknown error".to_owned())),
         }
     }
 
@@ -842,12 +860,17 @@ struct KAppOtp {
 async fn show_pairing(
     user: Option<SimpleUser>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
+    Extension(cache): Extension<redis::Client>,
 ) -> impl IntoResponse {
     if server_ctx.need_login(user).is_err() {
         return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
 
-    let owner = server_ctx.get_boss_owner().await;
+    let db_conn = cache
+        .get_async_connection()
+        .await
+        .or(Err(anyhow!("db async connect fail")));
+    let owner = server_ctx.get_boss_owner(db_conn).await;
     let (owner_id, paired, app_otp) = if owner.is_ok() {
         let otp = KAppOtp {
             ap_wallet: "...".to_string(),
@@ -926,7 +949,7 @@ async fn _create_pairing(
     };
 
     let msg = serde_json::to_string(&iot).unwrap();
-    conn.publish::<&str, &str, usize>("nms.shadow.update.pairing", &msg)
+    conn.publish::<&str, &str, usize>("kap/aws/shadow/name/pairing", &msg)
         .await
         .unwrap();
 
@@ -965,7 +988,7 @@ struct PairingStatus {
 }
 
 async fn get_pairing_status(
-    //Extension(cache): Extension<redis::Client>,
+    Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     let mut status = PairingStatus {
@@ -974,27 +997,17 @@ async fn get_pairing_status(
         owner_wallet: None,
         ap_wallet: Some(server_ctx.wallet.clone()),
     };
-    let owner = server_ctx.get_boss_owner().await;
+
+    let db_conn = cache
+        .get_async_connection()
+        .await
+        .or(Err(anyhow!("db async connect fail")));
+    let owner = server_ctx.get_boss_owner(db_conn).await;
     if owner.is_ok() {
         status.paired = true;
         status.owner_wallet = Some(owner.unwrap());
     }
 
-    /*if let Ok(mut db_conn) = cache.get_async_connection().await {
-        let ap_info = db_conn
-            .get::<&str, String>("kap.boss.ap.info")
-            .await
-            .or(Err("kap.boss.ap.info not found"))
-            .and_then(|s| serde_json::from_str::<BossApInfoData>(&s).or(Err("json convert fail")));
-
-        if let Ok(ap_info) = ap_info {
-            status.code = 200;
-            status.paired = if ap_info.user_wallet.is_none() { false } else { true };
-            status.owner_wallet = ap_info.user_wallet;
-        } else {
-            status.code = 200;
-        }
-    }*/
     (StatusCode::OK, Json(status))
 }
 
@@ -1322,7 +1335,10 @@ async fn por_wifi(
                 .unwrap();
 
             let mut sub_conn = conn.into_pubsub();
-            sub_conn.subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG)).await.unwrap();
+            sub_conn
+                .subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG))
+                .await
+                .unwrap();
             let mut sub_stream = sub_conn.on_message();
 
             resp = tokio::select! {

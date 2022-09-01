@@ -32,36 +32,29 @@ boss_owner_info() {
 provision_main() {
     sdk=$(fika-manager -V | awk '{print $2}')
     sdk=${sdk:-0.0.0}
-    wallet=$(redis-cli get kap.core | jq -r .wallet_address)
-    nickname=$(redis-cli get kap.por.config | jq -r .nickname)
+    wallet=$(redis-cli get kap.core | jq -cM .wallet_address)
+    nickname=$(redis-cli get kap.por.config | jq -cM .nickname)
     #XXX, jq response *null* if key nonexist
-    owner=$(boss_owner_info)
+    owner=$(redis-cli GET kap.boss.ap.info | jq -cM .user_wallet)
+    [ "$owner" = "null" ] && owner=$(boss_owner_info)
 
     jq -rcM --null-input \
         --arg sdk "$sdk" \
-        --arg wallet "$wallet" \
-        --arg nickname "$nickname" \
-        --arg owner "$owner" \
+        --argjson wallet $wallet \
+        --argjson nickname $nickname \
+        --argjson owner $owner \
         '{ "sdk-version": $sdk, "ap-wallet-address": $wallet, "nickname": $nickname, "owner": $owner }'
 }
 
-check_owner() {
-    local wallet payload
-
-    wallet=$(redis-cli GET kap.boss.ap.info | jq -r .user_wallet)
-
-    [ -n "$wallet" ] && return 0
-
-    if boss_owner_info; then
-        payload=$(provision_main)
-        fika_log debug "[loop-boss-owner] publish nms.shadow.update.provision $payload ..."
-        echo $payload | jq -c && redis-cli PUBLISH "nms.shadow.update.provision" $payload
-    fi
+provision_sync_aws() {
+    payload=$(provision_main)
+    fika_log debug "[provision-sync-aws] publish kap/aws/shadow/name/provision $payload ..."
+    echo $payload | jq -c && redis-cli PUBLISH kap/aws/shadow/name/provision $payload
 }
 
 
 if [ $# -eq 0 ]; then
     provision_main
 else
-    [ "$1" = "check-owner" ] && check_owner
+    [ "$1" = "sync-aws" ] && provision_sync_aws
 fi
