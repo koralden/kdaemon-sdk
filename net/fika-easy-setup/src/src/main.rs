@@ -17,7 +17,7 @@ use axum::{
         rejection::TypedHeaderRejectionReason, ConnectInfo, Extension, FromRequest, Path, Query,
         RequestParts, TypedHeader,
     },
-    http::{header::SET_COOKIE, HeaderMap, StatusCode},
+    http::{header::CONTENT_TYPE, header::SET_COOKIE, HeaderMap, StatusCode},
     response::Html,
     response::{IntoResponse, Redirect, Response},
     routing::get,
@@ -41,7 +41,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
-use tracing::{debug, info /*, error*/};
+use tracing::{debug, error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fika_easy_setup::fas;
@@ -224,9 +224,9 @@ async fn private_service(mut opt: Opt) {
         .route("/", get(index))
         .route(
             API_PATH_AUTH_SIMPLE,
-            get(show_simple_auth).post(do_simple_auth),
+            get(get_session_auth).post(post_session_auth),
         )
-        .route(API_PATH_PAIRING, get(show_pairing)/*.post(create_pairing)*/)
+        .route(API_PATH_PAIRING, get(get_pairing).post(post_pairing))
         .route(API_PATH_PAIRING_STATUS, get(get_pairing_status))
         .route(
             API_PATH_SETUP_EASY,
@@ -343,26 +343,26 @@ async fn logout(
 }
 
 // Session is optional
-async fn index(user: Option<SimpleUser>) -> impl IntoResponse {
+async fn index(user: Option<SessionUser>) -> impl IntoResponse {
     match user {
         Some(_u) => Redirect::temporary(API_PATH_SETUP_EASY).into_response(),
         None => Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response(),
     }
 }
 
-async fn show_simple_auth() -> Html<&'static str> {
+async fn get_session_auth() -> Html<&'static str> {
     Html(std::include_str!("../templates/login.html"))
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(dead_code)]
-struct SimpleUser {
+struct SessionUser {
     name: String,
     password: String,
 }
 
 #[async_trait]
-impl<B> FromRequest<B> for SimpleUser
+impl<B> FromRequest<B> for SessionUser
 where
     B: Send,
 {
@@ -370,6 +370,12 @@ where
     type Rejection = AuthRedirect;
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let is_json = if check_application_json(req).is_ok() {
+            true
+        } else {
+            false
+        };
+
         let Extension(store) = Extension::<MemoryStore>::from_request(req)
             .await
             .expect("`MemoryStore` extension is missing");
@@ -378,37 +384,44 @@ where
             .await
             .map_err(|e| match *e.name() {
                 header::COOKIE => match e.reason() {
-                    TypedHeaderRejectionReason::Missing => AuthRedirect,
+                    TypedHeaderRejectionReason::Missing => AuthRedirect(is_json),
                     _ => panic!("unexpected error getting Cookie header(s): {}", e),
                 },
                 _ => panic!("unexpected error getting cookies: {}", e),
             })?;
-        let session_cookie = cookies.get(COOKIE_NAME).ok_or(AuthRedirect)?;
+        let session_cookie = cookies.get(COOKIE_NAME).ok_or(AuthRedirect(is_json))?;
 
         let session = store
             .load_session(session_cookie.to_string())
             .await
             .unwrap()
-            .ok_or(AuthRedirect)?;
+            .ok_or(AuthRedirect(is_json))?;
 
-        let user = session.get::<SimpleUser>("user").ok_or(AuthRedirect)?;
+        let user = session
+            .get::<SessionUser>("user")
+            .ok_or(AuthRedirect(is_json))?;
 
         Ok(user)
     }
 }
 
-async fn do_simple_auth(
-    Form(login): Form<SimpleUser>,
+async fn post_session_auth(
+    input: JsonOrForm<SessionUser>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
     Extension(store): Extension<MemoryStore>,
-) -> impl IntoResponse /*Html<&'static str>*/ {
-    dbg!(&login);
-    dbg!(&server_ctx);
+) -> impl IntoResponse {
+    //dbg!(&server_ctx);
+    debug!("[post-session-auth] login {:?}", &input);
 
     let mut headers = HeaderMap::new();
 
+    let (is_json, login) = match input {
+        JsonOrForm::Json(j) => (true, j),
+        JsonOrForm::Form(f) => (false, f),
+    };
+
     if server_ctx.do_login(&login.name, &login.password).is_err() {
-        return (headers, Redirect::to(API_PATH_AUTH_SIMPLE));
+        return (headers, Redirect::to(API_PATH_AUTH_SIMPLE)).into_response();
     }
 
     // Create a new session filled with user data
@@ -424,7 +437,82 @@ async fn do_simple_auth(
     // Set cookie
     headers.insert(SET_COOKIE, cookie.parse().unwrap());
 
-    (headers, Redirect::to(API_PATH_SETUP_EASY))
+    match is_json {
+        false => (headers, Redirect::to(API_PATH_SETUP_EASY)).into_response(),
+        true => (headers, Json(json!({"code": 200}))).into_response(),
+    }
+}
+
+#[derive(Debug)]
+enum JsonOrForm<T, K = T> {
+    Json(T),
+    Form(K),
+}
+
+#[async_trait]
+impl<B, T, U> FromRequest<B> for JsonOrForm<T, U>
+where
+    B: Send,
+    Json<T>: FromRequest<B>,
+    Form<U>: FromRequest<B>,
+    T: 'static,
+    U: 'static,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let content_type_header = req.headers().get(CONTENT_TYPE);
+        let content_type = content_type_header.and_then(|value| value.to_str().ok());
+
+        if let Some(content_type) = content_type {
+            if content_type.starts_with("application/json") {
+                let Json(payload) = req.extract().await.map_err(IntoResponse::into_response)?;
+                return Ok(Self::Json(payload));
+            }
+
+            if content_type.starts_with("application/x-www-form-urlencoded") {
+                let Form(payload) = req.extract().await.map_err(IntoResponse::into_response)?;
+                return Ok(Self::Form(payload));
+            }
+        }
+
+        Err(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response())
+    }
+}
+
+fn check_application_json<B>(req: &RequestParts<B>) -> Result<()> {
+    let content_type_header = req.headers().get(CONTENT_TYPE);
+    let content_type = content_type_header.and_then(|value| value.to_str().ok());
+
+    if let Some(content_type) = content_type {
+        if content_type.starts_with("application/json") {
+            Ok(())
+        } else {
+            Err(anyhow!("normal html"))
+        }
+    } else {
+        Err(anyhow!("normal html"))
+    }
+}
+
+#[derive(Debug)]
+enum AppType {
+    Html,
+    Json,
+}
+
+#[async_trait]
+impl<B> FromRequest<B> for AppType
+where
+    B: Send,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        check_application_json(req)
+            .and_then(|_| Ok(Self::Json))
+            .or_else(|_| Ok(Self::Html))
+    }
 }
 
 const EASY_SETUP_TEMP: &str = std::include_str!("../templates/easy_setup.html");
@@ -447,16 +535,21 @@ struct NetworkConfig {
     password_overwrite: Option<String>,
 }
 
-struct AuthRedirect;
+struct AuthRedirect(bool);
 
 impl IntoResponse for AuthRedirect {
     fn into_response(self) -> Response {
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
+        if self.0 == false {
+            Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
+        } else {
+            let resp = json!({"code": 401, "message": "Unauthorized"});
+            (StatusCode::UNAUTHORIZED, Json(resp)).into_response()
+        }
     }
 }
 
 async fn show_network_setup(
-    user: Option<SimpleUser>,
+    user: Option<SessionUser>,
     Extension(cache): Extension<redis::Client>,
     Extension(server): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
@@ -478,7 +571,7 @@ async fn show_network_setup(
 
 // Valid user session required. If there is none, redirect to the auth page
 async fn update_network_setup(
-    user: Option<SimpleUser>,
+    user: Option<SessionUser>,
     Form(cfg): Form<NetworkConfig>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
@@ -797,7 +890,7 @@ impl ServerCtx {
         }
     }
 
-    fn need_login(&self, user: Option<SimpleUser>) -> Result<()> {
+    fn need_login(&self, user: Option<SessionUser>) -> Result<()> {
         debug!("need_login user {:?}", user);
         if user.is_none() {
             if let Ok(name) = env::var("LOGIN_NAME") {
@@ -857,13 +950,20 @@ struct KAppOtp {
 }
 
 #[debug_handler]
-async fn show_pairing(
-    user: Option<SimpleUser>,
+async fn get_pairing(
+    user: Option<SessionUser>,
+    app_type: AppType,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
     Extension(cache): Extension<redis::Client>,
 ) -> impl IntoResponse {
     if server_ctx.need_login(user).is_err() {
-        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+        match app_type {
+            AppType::Html => return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response(),
+            AppType::Json => {
+                let resp = json!({"code": 401, "message": "Unauthorized"});
+                return (StatusCode::OK, Json(resp)).into_response();
+            }
+        }
     }
 
     let db_conn = cache
@@ -885,99 +985,115 @@ async fn show_pairing(
         ("non-exist-owner".to_string(), false, app_otp)
     };
 
-    let owner_json = json!({
-        "ownerId": owner_id,
-        "paired": paired
-    });
+    match app_type {
+        AppType::Json => {
+            let resp = json!({
+                "code": 200,
+                "ap_wallet": &app_otp.ap_wallet,
+                "otp": &app_otp.otp,
+                "nickname": "TODO",
+                "ownerId": owner_id,
+                "paired": paired
+            });
+            return (StatusCode::OK, Json(resp)).into_response();
+        }
+        AppType::Html => {
+            let owner_json = json!({
+                "ownerId": owner_id,
+                "paired": paired
+            });
 
-    let cfg = serde_json::to_string(&app_otp).unwrap();
-    let code = QrCode::new(cfg.into_bytes()).unwrap();
-    let mut image = code
-        .render()
-        .min_dimensions(60, 60)
-        .max_dimensions(360, 360)
-        .light_color(svg::Color("#696969"))
-        .dark_color(svg::Color("#fff"))
-        .quiet_zone(true)
-        .build()
-        .into_bytes();
-    image.push(b'\n');
+            let cfg = serde_json::to_string(&app_otp).unwrap();
+            let code = QrCode::new(cfg.into_bytes()).unwrap();
+            let mut image = code
+                .render()
+                .min_dimensions(60, 60)
+                .max_dimensions(360, 360)
+                .light_color(svg::Color("#696969"))
+                .dark_color(svg::Color("#fff"))
+                .quiet_zone(true)
+                .build()
+                .into_bytes();
+            image.push(b'\n');
 
-    Html(
-        PAIRING_TEMP
-            .replace("{{ content }}", &String::from_utf8_lossy(&image))
-            .replace("{{ getJson }}", &owner_json.to_string())
-            .replace("{{ otp }}", &app_otp.otp)
-            .replace("{{ ownerId }}", &owner_id)
-            .replace("{{ routerId }}", &app_otp.ap_wallet),
-    )
-    .into_response()
+            Html(
+                PAIRING_TEMP
+                    .replace("{{ content }}", &String::from_utf8_lossy(&image))
+                    .replace("{{ getJson }}", &owner_json.to_string())
+                    .replace("{{ otp }}", &app_otp.otp)
+                    .replace("{{ ownerId }}", &owner_id)
+                    .replace("{{ routerId }}", &app_otp.ap_wallet),
+            )
+            .into_response()
+        }
+    }
 }
 
-/*#[derive(Debug, Serialize, Deserialize, Clone)]
-struct PairingCfg {
-    otp: String,
-}
-
-// Valid user session required. If there is none, redirect to the auth page
-async fn _create_pairing(
-    user: Option<SimpleUser>,
-    Json(input): Json<PairingCfg>,
+#[debug_handler]
+async fn post_pairing(
+    user: Option<SessionUser>,
+    //app_type: AppType,
+    Json(input): Json<PorCfg>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     if server_ctx.need_login(user).is_err() {
-        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+        let resp = json!({"code": 401, "message": "Unauthorized"});
+        return (StatusCode::OK, Json(resp)).into_response();
     }
 
-    dbg!(&input);
-    let mut conn = cache.get_async_connection().await.unwrap();
+    let msg = serde_json::to_string(&input).unwrap();
 
-    let otp = input.otp;
-    if let Ok(saved_otp) = conn.get::<&str, String>("nms.pairing.otp").await {
-        if saved_otp == otp {
-            return get_result_emoji("Pairing Fail due to invalid OTP", "broken heart")
-                .await
-                .into_response();
+    let (code, message) = if let Ok(mut conn) = cache.get_async_connection().await {
+        match conn
+            .set::<&str, &str, String>(KEY_KAP_POR_CONFIG, &msg)
+            .await
+        {
+            Ok(_) => {}
+            Err(_e) => {
+                error!("IPC SET {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+            }
         }
-    }
 
-    let iot = IotPairingCfg {
-        wallet: Some(server_ctx.wallet.clone()),
-        expire: None,
-        otp: Some(otp),
-    };
+        if let Ok(_) = conn
+            .publish::<&str, &str, usize>(KEY_KAP_POR_CONFIG, &msg)
+            .await
+        {
+            let mut sub_conn = conn.into_pubsub();
+            sub_conn
+                .subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG))
+                .await
+                .unwrap();
+            let mut sub_stream = sub_conn.on_message();
 
-    let msg = serde_json::to_string(&iot).unwrap();
-    conn.publish::<&str, &str, usize>("kap/aws/shadow/name/pairing", &msg)
-        .await
-        .unwrap();
-
-    let mut sub_conn = conn.into_pubsub();
-    sub_conn.subscribe("nms.pairing.status").await.unwrap();
-    let mut sub_stream = sub_conn.on_message();
-
-    let resp = tokio::select! {
-        Some(res) = sub_stream.next() => {
-            match res.get_payload::<String>() {
-                Ok(status) => {
-                    if status.eq("success") {
-                        "rocket".to_string()
-                    }
-                    else {
-                        "thumbs down".to_string()
+            _ = tokio::select! {
+                Some(res) = sub_stream.next() => {
+                    match res.get_payload::<String>() {
+                        Ok(status) => {
+                            if status.eq("success") {
+                                "rocket".to_string()
+                            }
+                            else {
+                                "thumbs down".to_string()
+                            }
+                        },
+                        _ => "pick".to_string(),
                     }
                 },
-                _ => "pick".to_string(),
-            }
-        },
-        _ = time::sleep(Duration::from_secs(10)) => "hourglass not done".to_string(),
+                _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
+            };
+        } else {
+            error!("IPC PUB {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+        }
+        (200, "success")
+    } else {
+        dbg!(&msg);
+        (501, "internal server error")
     };
 
-    get_result_emoji(&format!("Pairing {}", resp), &resp)
-        .await
-        .into_response()
-}*/
+    let resp = json!({"code": code, "message": message});
+    return (StatusCode::OK, Json(resp)).into_response();
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct PairingStatus {
@@ -1248,7 +1364,7 @@ struct SystemChecking {
 }
 
 async fn system_checking(
-    user: Option<SimpleUser>,
+    user: Option<SessionUser>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
@@ -1283,7 +1399,7 @@ struct PorCfg {
 }
 
 async fn _por_config(
-    user: Option<SimpleUser>,
+    user: Option<SessionUser>,
     Extension(cache): Extension<redis::Client>,
 ) -> impl IntoResponse {
     if user.is_none() {
@@ -1304,7 +1420,7 @@ static KEY_KAP_POR_CONFIG: &str = "kap.por.config";
 
 // Valid user session required. If there is none, redirect to the auth page
 async fn por_wifi(
-    user: Option<SimpleUser>,
+    user: Option<SessionUser>,
     payload: Option<Json<PorCfg>>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
@@ -1313,7 +1429,7 @@ async fn por_wifi(
         return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
 
-    dbg!(&payload);
+    //dbg!(&payload);
 
     if let Some(Json(input)) = payload {
         let msg = serde_json::to_string(&input).unwrap();
@@ -1326,50 +1442,54 @@ async fn por_wifi(
             {
                 Ok(_) => {}
                 Err(_e) => {
-                    debug!("db set {} as {}", KEY_KAP_POR_CONFIG, &msg);
+                    error!("IPC SET {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
                 }
             }
 
-            conn.publish::<&str, &str, usize>(KEY_KAP_POR_CONFIG, &msg)
+            if let Ok(_) = conn
+                .publish::<&str, &str, usize>(KEY_KAP_POR_CONFIG, &msg)
                 .await
-                .unwrap();
+            {
+                let mut sub_conn = conn.into_pubsub();
+                sub_conn
+                    .subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG))
+                    .await
+                    .unwrap();
+                let mut sub_stream = sub_conn.on_message();
 
-            let mut sub_conn = conn.into_pubsub();
-            sub_conn
-                .subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG))
-                .await
-                .unwrap();
-            let mut sub_stream = sub_conn.on_message();
-
-            resp = tokio::select! {
-                Some(res) = sub_stream.next() => {
-                    match res.get_payload::<String>() {
-                        Ok(status) => {
-                            if status.eq("success") {
-                                "rocket".to_string()
-                            }
-                            else {
-                                "thumbs down".to_string()
-                            }
-                        },
-                        _ => "pick".to_string(),
-                    }
-                },
-                _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
-            };
+                resp = tokio::select! {
+                    Some(res) = sub_stream.next() => {
+                        match res.get_payload::<String>() {
+                            Ok(status) => {
+                                if status.eq("success") {
+                                    "rocket".to_string()
+                                }
+                                else {
+                                    "thumbs down".to_string()
+                                }
+                            },
+                            _ => "pick".to_string(),
+                        }
+                    },
+                    _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
+                };
+            } else {
+                error!("IPC PUB {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+            }
         } else {
             dbg!(&msg);
         }
 
         get_result_emoji("PoR service", &resp).await.into_response()
     } else {
-        let mut cfg = String::from(r#"{"state":true,"nickname":"null"}"#);
-        if let Ok(mut conn) = cache.get_async_connection().await {
-            cfg = conn
-                .get::<&str, String>(KEY_KAP_POR_CONFIG)
+        let cfg = if let Ok(mut conn) = cache.get_async_connection().await {
+            conn.get::<&str, String>(KEY_KAP_POR_CONFIG)
                 .await
-                .unwrap_or_else(|_| "{}".into());
-        }
+                .unwrap_or_else(|_| r#"{"state":true,"nickname":"null"}"#.to_string())
+        } else {
+            r#"{"state":true,"nickname":"null"}"#.to_string()
+        };
+
         Html(POR_TEMP.replace("{{ getJson }}", &cfg)).into_response()
     }
 }
