@@ -27,7 +27,7 @@ use axum_macros::debug_handler;
 use axum_server::tls_rustls::RustlsConfig;
 use chrono::prelude::*;
 use clap::Parser;
-use futures_util::{StreamExt as _, TryFutureExt};
+use futures_util::{StreamExt as _/*, TryFutureExt*/};
 use http::header;
 use qrcode::render::svg;
 use qrcode::QrCode;
@@ -41,7 +41,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{env, net::SocketAddr};
 use tokio::time::{self, Duration};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fika_easy_setup::fas;
@@ -344,11 +344,23 @@ async fn logout(
     Redirect::to("/")
 }
 
-// Session is optional
-async fn index(user: Option<SessionUser>) -> impl IntoResponse {
-    match user {
-        Some(_u) => Redirect::temporary(API_PATH_SETUP_EASY).into_response(),
-        None => Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response(),
+async fn index(
+    user: Option<SessionUser>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
+) -> impl IntoResponse {
+    if server_ctx.need_login(user).is_err() {
+        return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
+    }
+
+    match online::check(Some(3)).await {
+        Ok(c) => {
+            debug!("online check ok - {:?}", c);
+            Redirect::temporary(API_PATH_PAIRING).into_response()
+        },
+        Err(e) => {
+            debug!("online check err - {:?}", e);
+            Redirect::temporary(API_PATH_SETUP_EASY).into_response()
+        },
     }
 }
 
@@ -413,7 +425,7 @@ async fn post_session_auth(
     Extension(store): Extension<MemoryStore>,
 ) -> impl IntoResponse {
     //dbg!(&server_ctx);
-    debug!("[post-session-auth] login {:?}", &input);
+    //debug!("[post-session-auth] login {:?}", &input);
 
     let mut headers = HeaderMap::new();
 
@@ -423,7 +435,13 @@ async fn post_session_auth(
     };
 
     if server_ctx.do_login(&login.name, &login.password).is_err() {
-        return (headers, Redirect::to(API_PATH_AUTH_SIMPLE)).into_response();
+        return match is_json {
+            false => (headers, Redirect::to(API_PATH_AUTH_SIMPLE)).into_response(),
+            true => {
+                let resp = json!({"code": 401, "message": "Unauthorized"});
+                (StatusCode::UNAUTHORIZED, Json(resp)).into_response()
+            },
+        }
     }
 
     // Create a new session filled with user data
@@ -441,7 +459,7 @@ async fn post_session_auth(
 
     match is_json {
         false => (headers, Redirect::to(API_PATH_SETUP_EASY)).into_response(),
-        true => (headers, Json(json!({"code": 200}))).into_response(),
+        true => (headers, Json(json!({"code": 200, "message": "login success"}))).into_response(),
     }
 }
 
@@ -564,7 +582,7 @@ async fn show_network_setup(
     );
     if let Ok(mut conn) = cache.get_async_connection().await {
         cfg = conn
-            .get::<&str, String>("kdaemon.easy.setup")
+            .get::<&str, String>(KEY_KAP_SYSTEM_CONFIG)
             .await
             .unwrap_or_else(|_| "{}".into());
     }
@@ -582,7 +600,8 @@ async fn update_network_setup(
         return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
 
-    dbg!(&cfg);
+    //dbg!(&cfg);
+    let ipc_key = KEY_KAP_SYSTEM_CONFIG;
 
     let msg = match serde_json::to_string(&cfg) {
         Ok(c) => c,
@@ -593,15 +612,27 @@ async fn update_network_setup(
     };
 
     if let Ok(mut conn) = cache.get_async_connection().await {
-        conn.set::<&str, &str, String>("kdaemon.easy.setup", &msg)
+        if let Ok(orig) = conn.get::<&str, String>(ipc_key).await {
+            if orig != msg {
+                let key = format!("{}.old", ipc_key);
+                if let Err(e) = conn.set::<&str, &str, String>(&key, &orig).await {
+                    error!("ipc backup {:?}/{:?} error - {:?}",
+                           key, orig, e);
+                }
+            } else {
+                return get_result_emoji("Setup Done", "rocket").await.into_response();
+            }
+        }
+
+        conn.set::<&str, &str, String>(ipc_key, &msg)
             .await
             .unwrap();
-        conn.publish::<&str, &str, usize>("kdaemon.easy.setup", &msg)
+        conn.publish::<&str, &str, usize>(ipc_key, &msg)
             .await
             .unwrap();
 
         let mut sub_conn = conn.into_pubsub();
-        sub_conn.subscribe("kdaemon.easy.setup.ack").await.unwrap();
+        sub_conn.subscribe(&format!("{ipc_key}.ack")).await.unwrap();
         let mut sub_stream = sub_conn.on_message();
 
         /*TODO, ui/ux display progress for this long-term job */
@@ -899,7 +930,9 @@ impl ServerCtx {
     fn get_shadow_password(&self, username: &str) -> Result<String> {
         match shadow::Shadow::from_name(username) {
             Some(s) => Ok(s.password),
-            None => Err(anyhow::anyhow!("User {} password not found", username)),
+            None => {
+                Err(anyhow::anyhow!("User {} password not found", username))
+            },
         }
     }
 
@@ -929,26 +962,34 @@ impl ServerCtx {
     }
 
     fn do_login(&self, user: &str, passwd: &str) -> Result<()> {
-        if let Some(username) = &self.login_name {
+        if let Ok(spassword) = self.get_shadow_password(user) {
+            if spassword.len() != 0 && pwhash::unix::verify(&passwd, &spassword) == false {
+                warn!("shadow permission denied or password not match");
+                return Err(anyhow::anyhow!("Shadow password not match"));
+            }
+        } else if let Some(username) = &self.login_name {
             if username != user {
+                warn!("user-name not match");
                 return Err(anyhow::anyhow!("User-name not match"));
             }
         } else if let Ok(username) = env::var("LOGIN_NAME") {
             if &username != user {
+                warn!("env user-name not match");
                 return Err(anyhow::anyhow!("Env user-name not match"));
             }
         } else if let Some(password) = &self.login_password {
             if password != &passwd {
+                warn!("password not match");
                 return Err(anyhow::anyhow!("Password not match"));
             }
         } else if let Ok(password) = env::var("LOGIN_PASSWORD") {
             if &password != passwd {
+                warn!("env password not match");
                 return Err(anyhow::anyhow!("Env password not match"));
             }
-        } else if let Ok(spassword) = self.get_shadow_password(user) {
-            if spassword.len() != 0 && pwhash::unix::verify(&passwd, &spassword) == false {
-                return Err(anyhow::anyhow!("Shadow password not match"));
-            }
+        } else {
+            warn!("user non-exist");
+            return Err(anyhow::anyhow!("user non-exist"));
         }
         Ok(())
     }
@@ -1026,8 +1067,8 @@ async fn get_pairing(
         AppType::Json => {
             let resp = json!({
                 "code": 200,
-                "ap_wallet": &app_otp.ap_wallet,
-                "otp": &app_otp.otp,
+                "ap_wallet": server_ctx.wallet.clone(),
+                "otp": if paired == true { "null" } else { &app_otp.otp},
                 "nickname": nickname,
                 "ownerId": owner_id,
                 "paired": paired
@@ -1066,11 +1107,26 @@ async fn get_pairing(
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+struct PairingCfg {
+    user_wallet: String,
+    nickname: String,
+}
+
+impl PairingCfg {
+    fn generate_por_cfg(&self) -> PorCfg {
+        PorCfg {
+            state: true,
+            nickname: Some(self.nickname.clone()),
+        }
+    }
+}
+
 #[debug_handler]
 async fn post_pairing(
     user: Option<SessionUser>,
     //app_type: AppType,
-    Json(input): Json<PorCfg>,
+    Json(input): Json<PairingCfg>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
@@ -1079,52 +1135,60 @@ async fn post_pairing(
         return (StatusCode::OK, Json(resp)).into_response();
     }
 
-    let msg = serde_json::to_string(&input).unwrap();
+    let ipc_key = KEY_KAP_POR_CONFIG;
+    let por = input.generate_por_cfg();
+    let msg = serde_json::to_string(&por).unwrap();
 
     let (code, message) = if let Ok(mut conn) = cache.get_async_connection().await {
+        if let Ok(orig) = conn.get::<&str, String>(ipc_key).await {
+            if orig != msg {
+                let key = format!("{}.old", ipc_key);
+                if let Err(e) = conn.set::<&str, &str, String>(&key, &orig).await {
+                    error!("ipc backup {:?}/{:?} error - {:?}",
+                           key, orig, e);
+                }
+            } else {
+                let resp = json!({"code": 200, "message": "do nothing"});
+                return (StatusCode::OK, Json(resp)).into_response();
+            }
+        }
+
         match conn
-            .set::<&str, &str, String>(KEY_KAP_POR_CONFIG, &msg)
+            .set::<&str, &str, String>(ipc_key, &msg)
             .await
         {
             Ok(_) => {}
             Err(_e) => {
-                error!("IPC SET {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+                error!("ipc {}/{} set fail", ipc_key, &msg);
             }
         }
 
         if let Ok(_) = conn
-            .publish::<&str, &str, usize>(KEY_KAP_POR_CONFIG, &msg)
+            .publish::<&str, &str, usize>(ipc_key, &msg)
             .await
         {
             let mut sub_conn = conn.into_pubsub();
             sub_conn
-                .subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG))
+                .subscribe(&format!("{}.ack", ipc_key))
                 .await
                 .unwrap();
             let mut sub_stream = sub_conn.on_message();
 
             _ = tokio::select! {
                 Some(res) = sub_stream.next() => {
-                    match res.get_payload::<String>() {
-                        Ok(status) => {
-                            if status.eq("success") {
-                                "rocket".to_string()
-                            }
-                            else {
-                                "thumbs down".to_string()
-                            }
-                        },
-                        _ => "pick".to_string(),
-                    }
+                    let r = res.get_payload::<String>();
+                    debug!("ipc {} receive ack as {:?}",
+                           ipc_key, r);
                 },
-                _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
+                _ = time::sleep(Duration::from_secs(40)) => {
+                    debug!("ipc {ipc_key} receive ack timeout");
+                }
             };
         } else {
-            error!("IPC PUB {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+            error!("ipc {}/{} pub fail", ipc_key, &msg);
         }
         (200, "success")
     } else {
-        dbg!(&msg);
         (501, "internal server error")
     };
 
@@ -1454,6 +1518,7 @@ async fn _por_config(
 }
 
 static KEY_KAP_POR_CONFIG: &str = "kap.por.config";
+static KEY_KAP_SYSTEM_CONFIG: &str = "kdaemon.easy.setup";
 
 async fn ipc_get_por_config(ipc: Result<redis::aio::Connection>) -> Result<PorCfg> {
     let cfg = if let Ok(mut conn) = ipc {
@@ -1478,29 +1543,42 @@ async fn por_wifi(
     }
 
     //dbg!(&payload);
+    let ipc_key = KEY_KAP_POR_CONFIG;
 
     if let Some(Json(input)) = payload {
         let msg = serde_json::to_string(&input).unwrap();
         let mut resp = "thumbs down".to_string();
 
         if let Ok(mut conn) = cache.get_async_connection().await {
+            if let Ok(orig) = conn.get::<&str, String>(ipc_key).await {
+                if orig != msg {
+                    let key = format!("{}.old", ipc_key);
+                    if let Err(e) = conn.set::<&str, &str, String>(&key, &orig).await {
+                        error!("ipc backup {:?}/{:?} error - {:?}",
+                               key, orig, e);
+                    }
+                } else {
+                    return get_result_emoji("PoR service", "rocket").await.into_response()
+                }
+            }
+
             match conn
-                .set::<&str, &str, String>(KEY_KAP_POR_CONFIG, &msg)
+                .set::<&str, &str, String>(ipc_key, &msg)
                 .await
             {
                 Ok(_) => {}
                 Err(_e) => {
-                    error!("IPC SET {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+                    error!("ipc {}/{} set fail", ipc_key, &msg);
                 }
             }
 
             if let Ok(_) = conn
-                .publish::<&str, &str, usize>(KEY_KAP_POR_CONFIG, &msg)
+                .publish::<&str, &str, usize>(ipc_key, &msg)
                 .await
             {
                 let mut sub_conn = conn.into_pubsub();
                 sub_conn
-                    .subscribe(&format!("{}.ack", KEY_KAP_POR_CONFIG))
+                    .subscribe(&format!("{}.ack", ipc_key))
                     .await
                     .unwrap();
                 let mut sub_stream = sub_conn.on_message();
@@ -1522,10 +1600,10 @@ async fn por_wifi(
                     _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
                 };
             } else {
-                error!("IPC PUB {}/{} fail", KEY_KAP_POR_CONFIG, &msg);
+                error!("ipc {}/{} pub fail", ipc_key, &msg);
             }
         } else {
-            dbg!(&msg);
+            error!("ipc async connect fail");
         }
 
         get_result_emoji("PoR service", &resp).await.into_response()

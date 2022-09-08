@@ -37,3 +37,4 @@ tower-http = { version = "0.3.0", features = ["fs", "trace"] }
 base64 = "0.13.0"
 serde_qs = "0.10.1"
 sha2 = "0.10.2"
+online = { git = "https://github.com/jesusprubio/online", rev = "1ba43a7" }
