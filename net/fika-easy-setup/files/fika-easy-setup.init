@@ -13,11 +13,13 @@ start() {
 	network_get_ipaddrs kguestIp kguest
         [ -z "$kguestIp" ] && kguestIp="192.168.178.1"
         grep -q k-ap /etc/hosts || echo -e "$lanIp\tk-ap$kguest\tk-ap" > /tmp/hosts/longdong
+        mac=$(ip link show dev eth0 | awk '/link/ {print $2}')
 	printf "Starting fika-easy-setup: "
 	umask 077
 	start-stop-daemon -S -q -c root:root -b \
 		-x /usr/bin/fika-easy-setup -- \
                 -a $lanIp --public-addr $kguestIp \
+                --mac-address $mac \
                 --certificate /etc/fika_easy_setup/certs/cert.pem \
                 --private-key /etc/fika_easy_setup/certs/key.pem
 

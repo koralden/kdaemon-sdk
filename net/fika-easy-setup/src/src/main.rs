@@ -27,7 +27,7 @@ use axum_macros::debug_handler;
 use axum_server::tls_rustls::RustlsConfig;
 use chrono::prelude::*;
 use clap::Parser;
-use futures_util::StreamExt as _;
+use futures_util::{StreamExt as _, TryFutureExt};
 use http::header;
 use qrcode::render::svg;
 use qrcode::QrCode;
@@ -101,8 +101,8 @@ struct Opt {
     access_token_ap: Option<String>,
     #[clap(long = "otp-path")]
     otp_path: Option<String>,
-    #[clap(long = "mac-address", default_value = "A1:A2:33:44:55:66")]
-    mac_address: String,
+    #[clap(long = "mac-address")]
+    mac_address: Option<String>,
 
     #[clap(long = "fas-port", default_value = "8887")]
     fas_port: u16,
@@ -115,7 +115,7 @@ struct Opt {
 static COOKIE_NAME: &str = "SESSION";
 
 static API_PATH_SETUP_EASY: &str = "/setup/easy";
-static API_PATH_AUTH_SIMPLE: &str = "/auth/simple";
+static API_PATH_AUTH_SIMPLE: &str = "/login";
 static API_PATH_PAIRING: &str = "/pairing";
 static API_PATH_PAIRING_STATUS: &str = "/pairing/status";
 static API_PATH_SHOW_EMOJI: &str = "/show/emoji";
@@ -170,6 +170,7 @@ async fn private_service(mut opt: Opt) {
     let mut access_token = opt.access_token;
     let mut otp_path = opt.otp_path;
     let mut wallet = opt.wallet_addr;
+    let mac = opt.mac_address;
     let mut access_token_ap = opt.access_token_ap;
     let mut ap_info_path = None;
 
@@ -216,6 +217,7 @@ async fn private_service(mut opt: Opt) {
         access_token,
         access_token_ap,
         wallet,
+        mac,
         opt.client_username.take(),
         opt.client_password.take(),
     );
@@ -715,6 +717,7 @@ struct ServerCtx {
     access_token: String,
     access_token_ap: String,
     wallet: String,
+    mac: String,
 
     /* authenticate */
     login_name: Option<String>,
@@ -731,6 +734,7 @@ impl ServerCtx {
         access_token: Option<String>,
         access_token_ap: Option<String>,
         wallet: Option<String>,
+        mac: Option<String>,
         login_name: Option<String>,
         login_password: Option<String>,
     ) -> Self {
@@ -745,6 +749,7 @@ impl ServerCtx {
                 "5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT".to_owned(),
                 |v| v,
             ),
+            mac: mac.map_or("a1:a2:33:44:55:66".to_string(), |v| v),
 
             login_name,
             login_password,
@@ -755,6 +760,14 @@ impl ServerCtx {
                 code: 404,
             }),
         }
+    }
+
+    async fn get_mac_address(&self, skip: usize) -> String {
+        let mac: String = self.mac.split(":")
+            .skip(skip)
+            .map(|m| m.to_uppercase())
+            .fold(String::from("-"), |all, m| all + m.as_str());
+        mac
     }
 
     async fn get_boss_otp(&self) -> Result<String> {
@@ -949,10 +962,17 @@ struct KAppOtp {
     //ap_mac: Option<String>, //XXX remove MAC
 }
 
+#[derive(Debug, Deserialize, Serialize, Default)]
+#[allow(dead_code)]
+struct OwnerInfo {
+    nickname: String,
+}
+
 #[debug_handler]
 async fn get_pairing(
     user: Option<SessionUser>,
     app_type: AppType,
+    owner_info: Option<Query<OwnerInfo>>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
     Extension(cache): Extension<redis::Client>,
 ) -> impl IntoResponse {
@@ -985,13 +1005,30 @@ async fn get_pairing(
         ("non-exist-owner".to_string(), false, app_otp)
     };
 
+    let conn = cache.get_async_connection().await.or_else(|e| Err(anyhow!("IPC async connect fail - {:?}", e)));
+    let por = ipc_get_por_config(conn).await
+        .ok()
+        .and_then(|p| p.nickname)
+        .or(None);
+
+    let nickname = if por.is_none() {
+        if let Some(owner_info) = owner_info {
+            format!("{}'s K-AP", owner_info.nickname)
+        } else {
+            let mac = server_ctx.get_mac_address(3).await;
+            format!("K-AP{}", mac)
+        }
+    } else {
+        por.unwrap()
+    };
+
     match app_type {
         AppType::Json => {
             let resp = json!({
                 "code": 200,
                 "ap_wallet": &app_otp.ap_wallet,
                 "otp": &app_otp.otp,
-                "nickname": "TODO",
+                "nickname": nickname,
                 "ownerId": owner_id,
                 "paired": paired
             });
@@ -1418,6 +1455,17 @@ async fn _por_config(
 
 static KEY_KAP_POR_CONFIG: &str = "kap.por.config";
 
+async fn ipc_get_por_config(ipc: Result<redis::aio::Connection>) -> Result<PorCfg> {
+    let cfg = if let Ok(mut conn) = ipc {
+        conn.get::<&str, String>(KEY_KAP_POR_CONFIG)
+            .await
+            .unwrap_or_else(|_| r#"{"state":true,"nickname":null}"#.to_string())
+    } else {
+        r#"{"state":true,"nickname":null}"#.to_string()
+    };
+    serde_json::from_str::<PorCfg>(&cfg).or_else(|e| Err(anyhow!("serde error {:?}", e)))
+}
+
 // Valid user session required. If there is none, redirect to the auth page
 async fn por_wifi(
     user: Option<SessionUser>,
@@ -1482,13 +1530,20 @@ async fn por_wifi(
 
         get_result_emoji("PoR service", &resp).await.into_response()
     } else {
-        let cfg = if let Ok(mut conn) = cache.get_async_connection().await {
+        /*let cfg = if let Ok(mut conn) = cache.get_async_connection().await {
             conn.get::<&str, String>(KEY_KAP_POR_CONFIG)
                 .await
                 .unwrap_or_else(|_| r#"{"state":true,"nickname":"null"}"#.to_string())
         } else {
             r#"{"state":true,"nickname":"null"}"#.to_string()
-        };
+        };*/
+
+        let conn = cache.get_async_connection().await.or_else(|e| Err(anyhow!("IPC async connect fail - {:?}", e)));
+        let cfg = ipc_get_por_config(conn)
+            .await
+            .and_then(|c| serde_json::to_string(&c)
+                      .or_else(|e| Err(anyhow!("serde to string fail - {:?}", e)))
+          ).unwrap();
 
         Html(POR_TEMP.replace("{{ getJson }}", &cfg)).into_response()
     }
