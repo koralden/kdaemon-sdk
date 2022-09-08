@@ -32,17 +32,17 @@ boss_owner_info() {
 provision_main() {
     sdk=$(fika-manager -V | awk '{print $2}')
     sdk=${sdk:-0.0.0}
-    wallet=$(redis-cli get kap.core | jq -cM .wallet_address)
-    nickname=$(redis-cli get kap.por.config | jq -cM .nickname)
+    wallet=$(redis-cli get kap.core | jq -rcM .wallet_address)
+    nickname=$(redis-cli get kap.por.config | jq -rcM .nickname)
     #XXX, jq response *null* if key nonexist
-    owner=$(redis-cli GET kap.boss.ap.info | jq -cM .user_wallet)
+    owner=$(redis-cli GET kap.boss.ap.info | jq -rcM .user_wallet)
     [ "$owner" = "null" ] && owner=$(boss_owner_info)
 
     jq -rcM --null-input \
         --arg sdk "$sdk" \
-        --argjson wallet $wallet \
-        --argjson nickname $nickname \
-        --argjson owner $owner \
+        --arg wallet "$wallet" \
+        --arg nickname "$nickname" \
+        --arg owner "$owner" \
         '{ "sdk-version": $sdk, "ap-wallet-address": $wallet, "nickname": $nickname, "owner": $owner }'
 }
 

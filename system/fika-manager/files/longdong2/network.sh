@@ -100,7 +100,7 @@ EOI
 #set firewall.$fcfg.dest=wan
 #commit
 #EOI
-
+    echo "success"
 }
 
 wlan_guest_off() {
@@ -116,6 +116,7 @@ $(uci show firewall | awk 'BEGIN { FS=OFS="." }
 /kguest/ { if (map[$2] != 1) { print "delete firewall."$2; map[$2]=1 } }')
 commit
 EOI
+    echo "success"
 }
 
 wlan_private() {
