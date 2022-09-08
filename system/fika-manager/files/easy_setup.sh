@@ -37,7 +37,7 @@ account_cb() {
 
             overwrite=$1 && shift
             if [ "Xon" = "X$overwrite" -o "Xtrue" = "X$overwrite" ]; then
-                msg=$(account_modify $@)
+                msg=$(account_modify "$1" $@)
                 code=200
             else
                 logger -s -t fika-manager -p debug "[$0] nothing"
@@ -60,7 +60,7 @@ wan_cb() {
     if [ "X$act" = "Xpppoe" ]; then
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wan pppoe"
-            msg=$(wan_pppoe $@)
+            msg=$(wan_pppoe "$1" "$2" $@)
             code=200
         else
             logger -s -t fika-manager -p error "[$0] $@ wan pppoe"
@@ -73,7 +73,7 @@ wan_cb() {
     elif [ "X$act" = "Xwwan" ]; then
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wan wwan"
-            msg=$(wan_wwan $@)
+            msg=$(wan_wwan "$1" "$2" $@)
         else
             logger -s -t fika-manager -p error "[$0] $@ wan wwan"
             msg="invalid username or password"
@@ -91,7 +91,7 @@ wlan_cb() {
     if [ "X$act" = "Xprivate" ]; then
         if [ $# -ge 2 ]; then
             logger -s -t fika-manager -p debug "[$0] $@ wlan private"
-            msg=$(wlan_private $@)
+            msg=$(wlan_private "$1" "$2" $@)
             code=200
         else
             logger -s -t fika-manager -p error "[$0] $@ wlan private"
@@ -142,30 +142,78 @@ get_boss_ap_token() {
     fi
 }
 
+cmp_wan() {
+    local new_type orig_type new_username orig_username
+    local new_password orig_password
+
+    new=$1 && shift
+    orig=$1 && shift
+
+    new_type=$(echo $new | jq -r .wan_type)
+    orig_type=$(echo $orig | jq -r .wan_type)
+    [ "X${new_type}" != "X${orig_type}" ] && return 0
+
+    if [ "X$type" = "X1" ]; then
+        new_username=$(echo $new | jq -r .wan_username)
+        orig_username=$(echo $orig | jq -r .wan_username)
+        [ "X${new_username}" != "X${orig_username}" ] && return 0
+
+        new_password=$(echo $new | jq -r .wan_password)
+        orig_password=$(echo $orig | jq -r .wan_password)
+        [ "X${new_password}" != "X${orig_password}" ] && return 0
+    fi
+
+    return 127
+}
+
+cmp_wlan() {
+    local new_ssid orig_ssid
+    local new_password orig_password
+
+    new=$1 && shift
+    orig=$1 && shift
+
+    new_ssid=$(echo $new | jq -r .wifi_ssid)
+    orig_ssid=$(echo $orig | jq -r .wifi_ssid)
+    [ "X${new_ssid}" != "X${orig_ssid}" ] && return 0
+
+    new_password=$(echo $new | jq -r .wifi_password)
+    orig_password=$(echo $orig | jq -r .wifi_password)
+    [ "X${new_password}" != "X${orig_password}" ] && return 0
+
+    return 127
+}
+
 main() {
+    local type pssid ppassword overwrite
     cfg=$1 && shift
+    orig=$(redis-cli GET kdaemon.easy.setup)
 
     system_cb
 
-    type=$(echo $cfg | jq -r .wan_type)
-    if [ "X$type" = "X1" ]; then
-        username=$(echo $cfg | jq -r .wan_username)
-        password=$(echo $cfg | jq -r .wan_passwod)
-        wan_cb pppoe $username $password
-    elif [ "X$type" = "X2" ]; then
-        wan_cb wwan $username $password
-    else
-        wan_cb dhcp
+    if cmp_wan "$cfg" "$orig"; then
+        type=$(echo $cfg | jq -r .wan_type)
+        if [ "X$type" = "X1" ]; then
+            username=$(echo $cfg | jq -r .wan_username)
+            password=$(echo $cfg | jq -r .wan_passwod)
+            wan_cb pppoe "$username" "$password"
+        elif [ "X$type" = "X2" ]; then
+            wan_cb wwan "$username" "$password"
+        else
+            wan_cb dhcp
+        fi
     fi
 
     pssid=$(echo $cfg | jq -r .wifi_ssid)
     ppassword=$(echo $cfg | jq -r .wifi_password)
-    wlan_cb private $pssid $ppassword
+    if cmp_wlan "$cfg" "$orig"; then
+        wlan_cb private "$pssid" "$ppassword"
+    fi
 
     [ $code -eq 200 ] && network_apply
 
     overwrite=$(echo $cfg | jq -r .password_overwrite)
-    account_cb modify $overwrite $ppassword
+    account_cb modify $overwrite "$ppassword"
 
     get_boss_ap_token
 
@@ -178,4 +226,4 @@ main() {
         '{ "message": $msg, "code": $code }'
 }
 
-[ $# -gt 0 ] && main $@
+[ $# -gt 0 ] && main "$@"

@@ -49,7 +49,7 @@ provision_main() {
 provision_sync_aws() {
     payload=$(provision_main)
     fika_log debug "[provision-sync-aws] publish kap/aws/shadow/name/provision $payload ..."
-    echo $payload | jq -c && redis-cli PUBLISH kap/aws/shadow/name/provision $payload
+    echo $payload | jq -c && redis-cli PUBLISH kap/aws/shadow/name/provision "$payload"
 }
 
 
