@@ -34,8 +34,10 @@ provision_main() {
     sdk=${sdk:-0.0.0}
     wallet=$(redis-cli get kap.core | jq -rcM .wallet_address)
     nickname=$(redis-cli get kap.por.config | jq -rcM .nickname)
-    #XXX, jq response *null* if key nonexist
-    owner=$(redis-cli GET kap.boss.ap.info | jq -rcM .user_wallet)
+    #XXX, jq response *null* if key no nexist
+    # XXX, just disable until oss->cmp->kap ready
+    #owner=$(redis-cli GET kap.boss.ap.info | jq -rcM .user_wallet)
+    owner="null"
     [ "$owner" = "null" ] && owner=$(boss_owner_info)
 
     jq -rcM --null-input \

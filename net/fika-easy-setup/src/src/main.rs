@@ -853,7 +853,8 @@ impl ServerCtx {
     }
 
     async fn get_boss_owner(&self, conn: Result<redis::aio::Connection>) -> Result<String> {
-        if let Ok(conn) = conn {
+        /*XXX, just disable until oss->cmp->kap ready
+         * if let Ok(conn) = conn {
             if let Ok(info) = self.db_boss_owner(conn).await {
                 //return info.user_wallet
                 //    .ok_or(anyhow!("user-wallet non-exist"));
@@ -861,7 +862,7 @@ impl ServerCtx {
                     return Ok(info.user_wallet.unwrap());
                 }
             }
-        }
+        }*/
 
         /* trandition BOSS/polling flow */
         let url = format!("{}/{}", &self.api_url, &self.ap_info_path);
