@@ -330,16 +330,18 @@ async fn public_service(
 
 async fn logout(
     Extension(store): Extension<MemoryStore>,
-    TypedHeader(cookies): TypedHeader<headers::Cookie>,
+    cookies: Option<TypedHeader<headers::Cookie>>,
 ) -> impl IntoResponse {
-    let cookie = cookies.get(COOKIE_NAME).unwrap();
-    let session = match store.load_session(cookie.to_string()).await.unwrap() {
-        Some(s) => s,
-        // No session active, just redirect
-        None => return Redirect::to("/"),
-    };
+    if let Some(TypedHeader(cookies)) = cookies {
+        let cookie = cookies.get(COOKIE_NAME).unwrap();
+        let session = match store.load_session(cookie.to_string()).await.unwrap() {
+            Some(s) => s,
+            // No session active, just redirect
+            None => return Redirect::to("/"),
+        };
 
-    store.destroy_session(session).await.unwrap();
+        store.destroy_session(session).await.unwrap();
+    }
 
     Redirect::to("/")
 }
