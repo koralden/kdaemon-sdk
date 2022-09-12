@@ -48,8 +48,12 @@
                             <h3 id="otpRaw">{{ otp }} </h3>
                         </div>
                     </div>
-                    <div class="w3-panel" id="kappOnly">
-                        <button class="w3-button w3-section w3-block w3-blue w3-ripple w3-padding" id="submit">Pair It</button>
+                    <div class="w3-container w3-margin-top w3-border">
+                        <h3 class="w3-left">NickName:</h3>
+                        <input id="nickname" name="nickname" class="w3-input w3-center" placeholder="Nick-Name" type="text" maxlength="20">
+                        <div class="PorSubmit w3-container w3-margin-top">
+                            <button id="PorSubmit" class="w3-button w3-section w3-blue w3-ripple w3-padding w3-block">Submit</button>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -61,33 +65,42 @@
                 ></script>
         <script>
             var getJson = {{ getJson }};
-            /*function openSidebar() {
-                            document.getElementById("mySidebar").style.display = "block";
-                        }
-            function closeSidebar() {
-                            document.getElementById("mySidebar").style.display = "none";
-                        }*/
-                $(document).ready(function () {
-                                /*closeSidebar*/
-                                    if (getJson["paired"] == true) {
-                                                    $("#pairing").hide();
-                                                    $("#warning").show();
-                                                }
-                                $('#submit').on('click', function (event) {
-                                                event.preventDefault();
-                                                AppFunction.device_otp($('#gwId').text(), $('#otpRaw').text());
-                                            });
-                                $('#kappOnly').hide();
-                                if (typeof AppFunction.check_is_app === 'function') {
-                                                if (AppFunction.check_is_app() === 1) {
-                                                                $('#browserOnly').hide();
-                                                                $('#kappOnly').show();
-                                                            }
-                                            }
-                                if ($('#qr').html() !== '') {
-                                                $('#qrcontrols').show();
-                                            }
-                            });
+
+            $(document).ready(function () {
+                $("#nickname").val(getJson["nickname"]);
+                if (getJson["paired"] == true) {
+                    $("#pairing").hide();
+                    $("#warning").show();
+                }
+                if ($('#qr').html() !== '') {
+                    $('#qrcontrols').show();
+                }
+                $('#PorSubmit').on('click', function (event) {
+                    event.preventDefault();
+
+                    var dataJSON = {};
+                    dataJSON["state"] = true;
+                    dataJSON["nickname"] = $('#nickname').val();
+
+                    $.ajax({
+                        type: 'POST',
+                        url: '/pairing',
+                        dataType: "json",
+                        contentType: "application/json;charset=utf-8",
+                        data: JSON.stringify(dataJSON),
+                        success: function (resp) {
+                            $('#content').html(resp);
+                        },
+                        error: function () {
+                            $('#qr').html(
+                            '<img src="https://via.placeholder.com/360/fff/f00/?text=ERROR! Try again..." height="360" width="360" />'
+                            );
+                            $('#qrcontrols').hide();
+                        },
+                        dataType: 'html',
+                    });
+                });
+            });
         </script>
     </body>
 </html>

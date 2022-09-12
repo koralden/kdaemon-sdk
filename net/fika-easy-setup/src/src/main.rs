@@ -460,7 +460,7 @@ async fn post_session_auth(
     headers.insert(SET_COOKIE, cookie.parse().unwrap());
 
     match is_json {
-        false => (headers, Redirect::to(API_PATH_SETUP_EASY)).into_response(),
+        false => (headers, Redirect::to(API_PATH_PAIRING)).into_response(),
         true => (headers, Json(json!({"code": 200, "message": "login success"}))).into_response(),
     }
 }
@@ -1081,6 +1081,7 @@ async fn get_pairing(
         AppType::Html => {
             let owner_json = json!({
                 "ownerId": owner_id,
+                "nickname": nickname,
                 "paired": paired
             });
 
@@ -1112,7 +1113,7 @@ async fn get_pairing(
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 struct PairingCfg {
-    user_wallet: String,
+    user_wallet: Option<String>,
     nickname: String,
 }
 
