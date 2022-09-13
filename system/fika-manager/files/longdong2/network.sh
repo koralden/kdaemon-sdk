@@ -39,8 +39,9 @@ wlan_guest_on() {
     echo "longdong2 wlan-guest $@"
 
     lanIpaddr=$(uci get network.lan.ipaddr)
+    src=$(uci get firewall.@forwarding[-1].src)
 
-    uci batch << EOI
+    [ "Xkguest" = "X${src}" ] || uci batch << EOI
 set network.kguest=interface
 set network.kguest.type=bridge
 set network.kguest.proto=static
@@ -87,19 +88,6 @@ set firewall.@forwarding[-1].dest=wan
 commit
 EOI
 
-#    zcfg=$(uci add firewall zone)
-#    fcfg=$(uci add firewall forwarding)
-#    uci batch << EOI
-#set firewall.$zcfg.name=kguest
-#set firewall.$zcfg.network=kguest
-#set firewall.$zcfg.input=ACCEPT
-#set firewall.$zcfg.output=ACCEPT
-#set firewall.$zcfg.forward=ACCEPT
-#
-#set firewall.$fcfg.src=kguest
-#set firewall.$fcfg.dest=wan
-#commit
-#EOI
     echo "success"
 }
 

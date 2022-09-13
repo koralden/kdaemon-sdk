@@ -29,7 +29,7 @@ use fika_manager::{publish_message, set_message, DbCommand};
 #[clap(
     name = "fika-manager",
     about = "FIKA manager to interactive with platform",
-    version = "0.0.2"
+    version = "0.0.3"
 )]
 struct Opt {
     #[clap(

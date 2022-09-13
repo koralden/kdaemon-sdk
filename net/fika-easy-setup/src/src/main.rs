@@ -52,7 +52,7 @@ use fika_easy_setup::kap_core::CoreMenu;
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.2"
+    version = "0.0.3"
 )]
 struct Opt {
     /// set the listen addr
@@ -146,6 +146,9 @@ async fn main() {
         opt.auth_dir.clone(),
     ));
 
+    let server_ctx = create_service_ctx(&opt).await;
+    let server_ctx = Arc::new(server_ctx);
+
     let http = tokio::spawn(public_service(
         opt.public_addr.clone(),
         opt.public_port,
@@ -153,38 +156,26 @@ async fn main() {
         opt.wallet_addr.clone(),
         opt.certificate.clone(),
         opt.private_key.clone(),
+        server_ctx.clone(),
     ));
-    let https = tokio::spawn(private_service(opt));
+    let https = tokio::spawn(private_service(opt, server_ctx.clone()));
 
     let _ = tokio::join!(https, http, fas);
 }
 
-async fn private_service(mut opt: Opt) {
-    // `MemoryStore` is just used as an example. Don't use this in production.
-    let store = MemoryStore::new();
-
+async fn create_service_ctx(opt: &Opt) -> ServerCtx {
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
 
-    let mut api_url = opt.api_url;
-    let mut access_token = opt.access_token;
-    let mut otp_path = opt.otp_path;
-    let mut wallet = opt.wallet_addr;
-    let mac = opt.mac_address;
-    let mut access_token_ap = opt.access_token_ap;
+    let mut api_url = opt.api_url.clone();
+    let mut access_token = opt.access_token.clone();
+    let mut otp_path = opt.otp_path.clone();
+    let mut wallet = opt.wallet_addr.clone();
+    let mac = opt.mac_address.clone();
+    let mut access_token_ap = opt.access_token_ap.clone();
     let mut ap_info_path = None;
 
     if let Ok(mut db_conn) = cache.get_async_connection().await {
-        /*let wallet = wallet.map_or_else(|e| {
-            let core = db_conn.get::<&str, String>("kap.core").await
-                .or(Err("kap.core not found"))
-                .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
-            /*if let Ok(core) = core {
-                wallet = core.wallet_address;
-            }*/
-            core.map_or(None, |c| Some(c.wallet_address))
-        }, |v| Some(v));*/
-
         let value = db_conn
             .get::<&str, String>("kap.core")
             .await
@@ -210,7 +201,7 @@ async fn private_service(mut opt: Opt) {
         }
     }
 
-    let otp = ServerCtx::new(
+    ServerCtx::new(
         api_url,
         otp_path,
         ap_info_path,
@@ -218,9 +209,20 @@ async fn private_service(mut opt: Opt) {
         access_token_ap,
         wallet,
         mac,
-        opt.client_username.take(),
-        opt.client_password.take(),
-    );
+        opt.client_username.clone(),
+        opt.client_password.clone(),
+    )
+}
+
+async fn private_service(
+    opt: Opt,
+    server_ctx: Arc<ServerCtx>,
+) {
+    // `MemoryStore` is just used as an example. Don't use this in production.
+    let store = MemoryStore::new();
+
+    let redis_addr = format!("redis://{}/", opt.redis_addr);
+    let cache = redis::Client::open(redis_addr).unwrap();
 
     let app = Router::new()
         .route("/", get(index))
@@ -240,7 +242,7 @@ async fn private_service(mut opt: Opt) {
         .route(API_PATH_POR_WIFI, get(por_wifi).post(por_wifi))
         .layer(Extension(store))
         .layer(Extension(cache))
-        .layer(Extension(Arc::new(otp)))
+        .layer(Extension(server_ctx))
         /*.merge(axum_extra::routing::SpaRouter::new(
             "/__res__",
             opt.static_dir,
@@ -279,6 +281,7 @@ async fn public_service(
     mut wallet: Option<String>,
     cert: Option<String>,
     private_key: Option<String>,
+    server_ctx: Arc<ServerCtx>,
 ) {
     let redis_addr = format!("redis://{}/", redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
@@ -300,8 +303,10 @@ async fn public_service(
             get(honest_challenge).post(update_honest_challenge),
         )
         .route(API_PATH_OPENNDS_FAS, get(public_opennds_fas))
+        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status))
         .layer(Extension(cache))
         .layer(Extension(wallet.unwrap()))
+        .layer(Extension(server_ctx))
         .into_make_service_with_connect_info::<SocketAddr>();
 
     let addr = SocketAddr::from((
@@ -844,7 +849,7 @@ impl ServerCtx {
           }*/
     }
 
-    async fn db_boss_owner(&self, mut conn: redis::aio::Connection) -> Result<BossApInfoData> {
+    async fn _db_boss_owner(&self, mut conn: redis::aio::Connection) -> Result<BossApInfoData> {
         /* updted via MQTT/subscribe in fika-manager */
         conn.get::<&str, String>("kap.boss.ap.info")
             .await
@@ -854,7 +859,7 @@ impl ServerCtx {
             })
     }
 
-    async fn get_boss_owner(&self, conn: Result<redis::aio::Connection>) -> Result<String> {
+    async fn get_boss_owner(&self, _conn: Result<redis::aio::Connection>) -> Result<String> {
         /*XXX, just disable until oss->cmp->kap ready
          * if let Ok(conn) = conn {
             if let Ok(info) = self.db_boss_owner(conn).await {
@@ -1206,6 +1211,7 @@ struct PairingStatus {
     paired: bool,
     owner_wallet: Option<String>,
     ap_wallet: Option<String>,
+    nickname: Option<String>,
 }
 
 async fn get_pairing_status(
@@ -1217,6 +1223,7 @@ async fn get_pairing_status(
         paired: false,
         owner_wallet: None,
         ap_wallet: Some(server_ctx.wallet.clone()),
+        nickname: None,
     };
 
     let db_conn = cache
@@ -1227,6 +1234,12 @@ async fn get_pairing_status(
     if owner.is_ok() {
         status.paired = true;
         status.owner_wallet = Some(owner.unwrap());
+    }
+    let ipc_conn = cache.get_async_connection()
+        .await
+        .or(Err(anyhow!("db async connect fail")));
+    if let Ok(p) = ipc_get_por_config(ipc_conn).await {
+        status.nickname = p.nickname;
     }
 
     (StatusCode::OK, Json(status))
