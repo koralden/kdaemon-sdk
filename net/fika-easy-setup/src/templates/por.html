@@ -28,6 +28,30 @@
                 <div class="w3-container w3-card w3-indigo w3-margin-top">
                     <h1>PoR Service</h1>
                 </div>
+                <div id="loading" class="loading w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>Por configuration apply, wireless will disconnect.</p>
+                    <p><i class="w3-jumbo w3-spin fa fa-refresh"></i>Please wait about 40s and reload page.</p>
+                </div>
+                <div id="success" class="success w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>
+                        <i class="w3-jumbo fas fa-rocket"></i>
+                        <i class="w3-jumbo fas fa-glass-cheers"></i>
+                        Por configuration apply success.
+                    </p>
+                </div>
+                <div id="fail" class="fail w3-panel w3-green w3-display-container" style="display:none">
+                    <span onclick="this.parentElement.style.display='none'"
+                        class="w3-button w3-display-topright">X</span>
+                    <p>
+                        <i class="w3-jumbo fas fa-skull-crossbones"></i>
+                        <i class="w3-jumbo far fa-thumbs-down"></i>
+                        Por configuration apply fail or just timeout(maybe reloading again).
+                    </p>
+                </div>
                 <form class="w3-container w3-card-4 w3-dark-gray">
                     <div class="w3-container w3-margin-top">
                         <input id="state" class="w3-check" type="checkbox">
@@ -62,6 +86,7 @@
                     dataJSON["state"] = $('#state').is(":checked");
                     dataJSON["nickname"] = $('#nickname').val();
 
+                    $("#loading").show();
                     $.ajax({
                         type: 'POST',
                         url: '/por/wifi',
@@ -69,13 +94,12 @@
                         contentType: "application/json;charset=utf-8",
                         data: JSON.stringify(dataJSON),
                         success: function (resp) {
-                            $('#content').html(resp);
+                            $("#loading").hide();
+                            $("#success").show();
                         },
                         error: function () {
-                            $('#qr').html(
-                            '<img src="https://via.placeholder.com/360/fff/f00/?text=ERROR! Try again..." height="360" width="360" />'
-                            );
-                            $('#qrcontrols').hide();
+                            $("#loading").hide();
+                            $("#fail").show();
                         },
                         dataType: 'html',
                     });

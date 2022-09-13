@@ -649,7 +649,7 @@ async fn update_network_setup(
                     _ => "NG".to_string(),
                 }
             },
-            _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
+            _ = time::sleep(Duration::from_secs(60)) => "hourglass not done".to_string(),
         };
 
         get_result_emoji("Setup Done", &resp).await.into_response()
@@ -1184,7 +1184,7 @@ async fn post_pairing(
                     debug!("ipc {} receive ack as {:?}",
                            ipc_key, r);
                 },
-                _ = time::sleep(Duration::from_secs(40)) => {
+                _ = time::sleep(Duration::from_secs(60)) => {
                     debug!("ipc {ipc_key} receive ack timeout");
                 }
             };
@@ -1601,7 +1601,7 @@ async fn por_wifi(
                             _ => "pick".to_string(),
                         }
                     },
-                    _ = time::sleep(Duration::from_secs(40)) => "hourglass not done".to_string(),
+                    _ = time::sleep(Duration::from_secs(60)) => "hourglass not done".to_string(),
                 };
             } else {
                 error!("ipc {}/{} pub fail", ipc_key, &msg);
