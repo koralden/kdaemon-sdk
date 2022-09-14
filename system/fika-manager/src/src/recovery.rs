@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::Args;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 //use std::sync::{Arc, Mutex};
@@ -18,20 +18,19 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 //use std::path::PathBuf;
 use async_trait::async_trait;
 
-use fika_manager::kap_boss::BossMenu;
-use fika_manager::kap_cmp::CmpMenu;
-use fika_manager::kap_core::CoreMenu;
-use fika_manager::kap_ez::{NetworkMenu, PorMenu};
+use crate::kap_boss::BossMenu;
+//use fika_manager::kap_cmp::CmpMenu;
+use crate::kap_core::CoreMenu;
+use crate::kap_ez::{NetworkMenu, PorMenu};
 
 //type DbConnection = Arc<Mutex<redis::aio::Connection>>;
 type DbConnection = redis::aio::Connection;
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Args, Debug, Clone)]
 #[clap(
-    name = "fika-manager-recovery",
     about = "FIKA manager recovery with factory data"
 )]
-struct Opt {
+pub struct RecoveryOpt {
     #[clap(
         short = 'c',
         long = "config",
@@ -51,7 +50,7 @@ struct KapFactory {
     network: KapNetworkConfig,
     por: KapPorConfig,
     boss: KapBossConfig,
-    cmp: KapCmpConfig,
+    //cmp: KapCmpConfig,
 }
 
 #[async_trait]
@@ -327,7 +326,7 @@ impl FactoryAction for KapBossConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+/*#[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct KapCmpConfig {
     cfg: CmpMenu,
@@ -384,7 +383,7 @@ impl FactoryAction for KapCmpConfig {
     fn get_key(&self) -> &str {
         return &self.key;
     }
-}
+}*/
 
 #[instrument(name = "recovery", skip(cfg))]
 async fn main_task(cfg: KapFactory, force: bool) -> Result<()> {
@@ -399,7 +398,7 @@ async fn main_task(cfg: KapFactory, force: bool) -> Result<()> {
     _ = cfg.network.run(&mut db_conn, force).await?;
     _ = cfg.por.run(&mut db_conn, force).await?;
     _ = cfg.boss.run(&mut db_conn, force).await?;
-    _ = cfg.cmp.run(&mut db_conn, force).await?;
+    //_ = cfg.cmp.run(&mut db_conn, force).await?;
 
     Ok(())
 }
@@ -418,9 +417,9 @@ fn set_up_logging(log_level: &str) -> Result<(), MyError> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), MyError> {
-    let opt = Opt::parse();
+//#[tokio::main]
+pub async fn recovery(opt: RecoveryOpt) -> Result<(), MyError> {
+    //let opt = Opt::parse();
     set_up_logging(&opt.log_level)?;
     debug!("config as {}", opt.config);
 

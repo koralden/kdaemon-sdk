@@ -15,11 +15,13 @@ pub use kap_cmp::CmpMenu;
 pub mod kap_core;
 pub use kap_core::CoreMenu;
 
-pub mod mqtt_client;
-pub use self::mqtt_client::{async_event_loop_listener, AWSIoTAsyncClient, AWSIoTSettings};
-pub use rumqttc::{EventLoop, Packet, Publish, QoS};
-pub mod mqtt_error;
-pub use self::mqtt_error::AWSIoTError;
+pub mod aws_iot;
+pub mod recovery;
+pub use self::recovery::{recovery, RecoveryOpt};
+pub mod misc;
+pub use self::misc::{misc, MiscOpt};
+pub mod daemon;
+pub use self::daemon::{daemon, DaemonOpt};
 
 #[derive(Debug)]
 #[allow(dead_code)]

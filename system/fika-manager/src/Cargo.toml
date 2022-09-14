@@ -9,14 +9,6 @@ edition = "2021"
 name = "fika-manager"
 path = "src/main.rs"
 
-[[bin]]
-name = "fika-manager-recovery"
-path = "src/recovery.rs"
-
-[[bin]]
-name = "fika-honest-challenge"
-path = "src/honest-challenge.rs"
-
 [dependencies]
 anyhow = "1.0.58"
 async-trait = "0.1.56"
@@ -37,3 +29,4 @@ toml = "0.5.9"
 tracing = "0.1.35"
 tracing-futures = "0.2.5"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+aws-iot-device-sdk-rust = { path = "aws-iot-device-sdk-rust" }

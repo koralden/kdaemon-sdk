@@ -1,18 +1,16 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::Args;
 use tracing::{debug, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use chrono::prelude::*;
 use std::path::PathBuf;
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Args, Debug, Clone)]
 #[clap(
-    name = "fika-honest-challenge",
-    about = "FIKA Honest Challenge",
-    version = "0.0.1"
+    about = "FIKA Misc Toolset",
 )]
-struct Opt {
+pub struct MiscOpt {
     #[clap(short = 's', long = "timestamp")]
     timestamp: Option<DateTime<Utc>>,
 
@@ -67,9 +65,9 @@ fn set_up_logging(log_level: &str) -> Result<() /*, MyError*/> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let opt = Opt::parse();
+//#[tokio::main]
+pub async fn misc(opt: MiscOpt) -> Result<()> {
+    //let opt = Opt::parse();
     set_up_logging(&opt.log_level)?;
 
     if let Some(t) = opt.timestamp {

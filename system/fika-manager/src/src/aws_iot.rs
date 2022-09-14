@@ -7,11 +7,10 @@ use tokio::fs;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::task;
 use tracing::{debug, error, info, instrument, warn};
-//use std::io;
 use chrono::prelude::*;
 use chrono::serde::ts_seconds;
-use fika_manager::mqtt_client::{async_event_loop_listener, AWSIoTAsyncClient, AWSIoTSettings};
-use fika_manager::{publish_message, DbCommand};
+use aws_iot_device_sdk_rust::{async_event_loop_listener, AWSIoTAsyncClient, AWSIoTSettings};
+use crate::{publish_message, DbCommand};
 use rumqttc::{self, Packet, QoS};
 use std::time::{SystemTime, UNIX_EPOCH};
 
