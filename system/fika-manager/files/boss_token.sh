@@ -54,7 +54,7 @@ get_main() {
 
     db_fetch
 
-    tasks=$(curl -s -H "ACCESSTOKEN:${accesstoken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -X GET "${rootUrl}/${hcsPath}?ap_wallet=${kapWallet}")
+    tasks=$(curl -s -H "ACCESSTOKEN:${accessToken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -X GET "${rootUrl}/${hcsPath}?ap_wallet=${kapWallet}")
     [ $DEBUG -eq 1 ] && tasks='{"hcs":[{"hcs_sid":"2022072215014100001","hcs_token":"94efde4c624ce129eab0756b52897de3","init_time":"2022-07-22T15:01:41+0800","invalid_time":"2022-07-22T16:19:41+0800"},{"hcs_sid":"2022072216012700001","hcs_token":"9f2d802c8f8854f82cc9ea9e5390c26f","init_time":"2022-07-22T16:01:27+0800","invalid_time":"2022-07-22T17:18:27+0800"}],"code":200}'
 
     code=$(echo $tasks | jq -r .code)

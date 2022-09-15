@@ -9,16 +9,20 @@
     sync;sync
 }
 
-[ -e /etc/fika_iot_gateway/config.yaml ] || {
-    fika_log debug "[$0] cp /etc/fika_iot_gateway/config.yaml.sample /etc/fika_iot_gateway/config.yaml"
+[ -e /etc/fika_manager/rule.toml ] || {
+    fika_log debug "[$0] cp /etc/fika_manager/rule.toml.sample /etc/fika_manager/rule.toml"
 
-    cp /etc/fika_iot_gateway/config.yaml.sample /etc/fika_iot_gateway/config.yaml
+    cp /etc/fika_manager/rule.toml.sample /etc/fika_manager/rule.toml
     sync;sync
 }
 
-[ -e /etc/fika_manager/config.toml ] || {
-    fika_log debug "[$0] cp /etc/fika_manager/config.toml.sample /etc/fika_manager/config.toml"
-
-    cp /etc/fika_manager/config.toml.sample /etc/fika_manager/config.toml
+[ -e $KDAEMON_TOML_PATH ] || {
+    if [ -e /userdata/factory.toml ]; then
+        fika_log debug "[$0] cp /userdata/factory.toml $KDAEMON_TOML_PATH"
+        cp /userdata/factory.toml $KDAEMON_TOML_PATH
+    else
+        fika_log debug "[$0] cp /etc/fika_manager/kdaemon.toml.sample $KDAEMON_TOML_PATH"
+        cp /etc/fika_manager/kdaemon.toml.sample $KDAEMON_TOML_PATH
+    fi
     sync;sync
 }

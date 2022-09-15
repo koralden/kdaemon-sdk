@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use tokio::fs;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::task;
+//use std::path::Path;
 use tracing::{debug, error, info, instrument, warn};
 use chrono::prelude::*;
 use chrono::serde::ts_seconds;
@@ -13,77 +14,32 @@ use aws_iot_device_sdk_rust::{async_event_loop_listener, AWSIoTAsyncClient, AWSI
 use crate::{publish_message, DbCommand};
 use rumqttc::{self, Packet, QoS};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::kap_daemon::{/*KCoreConfig, */KCmpConfig, KdaemonConfig};
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-pub struct AwsIotProvisionConfig {
+pub struct RuleAwsIotProvisionConfig {
     pub ca: String,
     pub cert: String,
-    pub key: String,
+    pub private: String,
     pub template: String,
     pub thing_prefix: String,
-    pub mac_address: String,
-    pub serial_number: String,
-    pub sku: String,
 }
 
-impl AwsIotProvisionConfig {
-    pub fn generate_thing_name(&self, extra: Option<&str>) -> Option<String> {
+impl RuleAwsIotProvisionConfig {
+    pub fn generate_thing_name(&self, extra: &str) -> Option<String> {
         Some(format!(
-            "{}_{}{}",
+            "{}_{}",
             &self.thing_prefix,
-            &self.mac_address,
-            extra.unwrap_or("")
+            extra
         ))
     }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-pub struct AwsIotDedicatedConfig {
-    pub ca: String,
-    pub cert: String,
-    pub key: String,
-    pub thing_name: Option<String>,
+pub struct RuleAwsIotDedicatedConfig {
     pub pull_topic: Option<Vec<String>>,
-}
-
-impl AwsIotDedicatedConfig {
-    pub fn apply_thing_name(&mut self, name: Option<String>) -> Result<()> {
-        if self.thing_name.is_none() {
-            self.thing_name = name;
-        } else {
-            warn!("thing-name-{:?} have forced", self.thing_name.as_ref());
-            //Err(anyhow!("thing-name have forced"))
-        }
-        Ok(())
-    }
-
-    pub async fn config_verify(&self) -> Result<()> {
-        let file = fs::File::open(&self.cert).await?;
-        let metadata = file.metadata().await?;
-        if metadata.is_dir() || metadata.len() == 0 {
-            return Err(anyhow!("{} invalid", &self.cert));
-        }
-
-        let file = fs::File::open(&self.key).await?;
-        let metadata = file.metadata().await?;
-        if metadata.is_dir() || metadata.len() == 0 {
-            return Err(anyhow!("{} invalid", &self.key));
-        }
-
-        let file = fs::File::open(&self.ca).await?;
-        let metadata = file.metadata().await?;
-        if metadata.is_dir() || metadata.len() == 0 {
-            return Err(anyhow!("{} invalid", &self.ca));
-        }
-
-        if self.thing_name.is_none() {
-            return Err(anyhow!("{:?} invalid", self.thing_name));
-        }
-
-        Ok(())
-    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -97,9 +53,13 @@ struct AwsIotKeyCertificate {
 }
 
 impl AwsIotKeyCertificate {
-    pub async fn save(&self, dedicated: &AwsIotDedicatedConfig) -> Result<()> {
-        fs::write(&dedicated.cert, &self.certificate_pem).await?;
-        fs::write(&dedicated.key, &self.private_key).await?;
+    pub async fn save(
+        &self,
+        cert_path: String,
+        private_path: String,
+    ) -> Result<()> {
+        fs::write(&cert_path, &self.certificate_pem).await?;
+        fs::write(&private_path, &self.private_key).await?;
         Ok(())
     }
 }
@@ -117,32 +77,30 @@ struct AwsIotThingResponse {
 
 #[instrument(name = "mqtt::provision", skip(_db_chan))]
 pub async fn mqtt_provision_task(
-    endpoint: &str,
-    provision: AwsIotProvisionConfig,
-    dedicated: Option<AwsIotDedicatedConfig>,
+    cfg: &KdaemonConfig,
+    provision: RuleAwsIotProvisionConfig,
     _db_chan: mpsc::Sender<DbCommand>,
-) -> Result<AwsIotDedicatedConfig> {
-    let client_id = format!("provisioner_{}", provision.serial_number);
+) -> Result<()> {
+    let cert_path = cfg.cmp.cert.clone();
+    let private_path = cfg.cmp.private.clone();
+    let serial_number = cfg.core.serial_number.clone()
+        .to_ascii_lowercase();
+    let mac_address = cfg.core.mac_address.clone()
+        .split(':')
+        .map(|e| e.to_ascii_lowercase())
+        .collect::<String>();
+    let sku = cfg.core.sku.clone();
+    let endpoint = cfg.cmp.endpoint.clone();
+
+    let client_id = format!("pid-{}", &serial_number[(serial_number.len() - 5)..]);
     let aws = AWSIoTSettings::new(
         client_id,
         provision.ca.clone(),
         provision.cert,
-        provision.key,
-        endpoint.to_string(),
+        provision.private,
+        endpoint,
         None,
     );
-
-    let mut dedicated = if let Some(d) = dedicated {
-        d
-    } else {
-        AwsIotDedicatedConfig {
-            ca: provision.ca.clone(),
-            cert: "/userdata/generated.cert.pem".to_string(),
-            key: "/userdata/generated.key.pem".to_string(),
-            thing_name: None,
-            pull_topic: None,
-        }
-    };
 
     if let Ok((iot_core_client, eventloop_stuff)) = AWSIoTAsyncClient::new(aws).await {
         iot_core_client
@@ -154,7 +112,7 @@ pub async fn mqtt_provision_task(
             .unwrap();
         let mut receiver = iot_core_client.get_receiver().await;
 
-        let recv_thread: task::JoinHandle<Result<AwsIotDedicatedConfig>> = tokio::spawn(
+        let recv_thread: task::JoinHandle<Result<()>> = tokio::spawn(
             async move {
                 loop {
                     match receiver.recv().await {
@@ -166,13 +124,13 @@ pub async fn mqtt_provision_task(
                                         match serde_json::from_slice::<AwsIotKeyCertificate>(&p.payload) {
                                             Ok(g) => {
                                                 //debug!("got key&certificate from AWS-IOT/provision - {:?}", g);
-                                                let _ = g.save(&dedicated).await;
+                                                let _ = g.save(cert_path.clone(), private_path.clone()).await;
                                                 let payload = json!({
                                                     "certificateOwnershipToken": g.certificate_ownership_token,
                                                     "parameters": {
-                                                        "SerialNumber": provision.serial_number,
-                                                        "MAC": provision.mac_address,
-                                                        "DeviceLocation": provision.sku,
+                                                        "SerialNumber": serial_number,
+                                                        "MAC": mac_address,
+                                                        "DeviceLocation": sku,
                                                     }
                                                 }).to_string();
                                                 let topic = format!("$aws/provisioning-templates/{}/provision/json", provision.template);
@@ -195,10 +153,7 @@ pub async fn mqtt_provision_task(
                                             match serde_json::from_slice::<AwsIotThingResponse>(&p.payload) {
                                                 Ok(t) => {
                                                     debug!("topic-{} got {:?}", topic, t);
-                                                    dedicated.thing_name = Some(t.thing_name);
-
-                                                    info!("return from recv thread - {:?}", &dedicated);
-                                                    return Ok(dedicated);
+                                                    return Ok(());
                                                 },
                                                 Err(e) => {
                                                     error!("serde/json[topic - {}] fail {:?}", topic, e);
@@ -240,17 +195,17 @@ pub async fn mqtt_provision_task(
         });
 
         match tokio::join!(recv_thread, listen_thread) {
-            (Ok(dedicated), Ok(_)) => {
+            (Ok(_), Ok(_)) => {
                 info!("provision listen/recv thread normal terminated");
-                Ok(dedicated.unwrap())
+                Ok(())
             }
             (Err(e), Ok(_)) => {
                 error!("provision recv thread abnormal terminated - {:?}", e);
                 Err(anyhow!(e))
             }
-            (Ok(dedicated), Err(e)) => {
+            (Ok(_), Err(e)) => {
                 error!("provision listen thread abnormal terminated - {:?}", e);
-                Ok(dedicated.unwrap())
+                Ok(())
             }
             (Err(e1), Err(e2)) => {
                 info!(
@@ -267,8 +222,7 @@ pub async fn mqtt_provision_task(
 
 #[instrument(name = "mqtt::dedicated")]
 pub async fn mqtt_dedicated_create(
-    endpoint: &str,
-    dedicated: &AwsIotDedicatedConfig,
+    cmp: &KCmpConfig,
 ) -> Result<(
     AWSIoTAsyncClient,
     (
@@ -276,16 +230,16 @@ pub async fn mqtt_dedicated_create(
         tokio::sync::broadcast::Sender<rumqttc::Packet>,
     ),
 )> {
-    dedicated.config_verify().await?;
+    cmp.config_verify().await?;
 
-    let thing_name = dedicated.thing_name.as_ref().unwrap();
+    let thing_name = cmp.thing.as_ref().unwrap();
     let client_id = thing_name.clone();
     let aws = AWSIoTSettings::new(
         client_id,
-        dedicated.ca.clone(),
-        dedicated.cert.clone(),
-        dedicated.key.clone(),
-        endpoint.to_string(),
+        cmp.ca.clone(),
+        cmp.cert.clone(),
+        cmp.private.clone(),
+        cmp.endpoint.clone(),
         None,
     );
 
@@ -317,13 +271,16 @@ pub async fn mqtt_dedicated_start(
     iot_core_client.subscribe(&topic, QoS::AtMostOnce).await?;
     info!("aws/iot subscribed {} ok", &topic);
 
-    sub_conn.psubscribe("kap/aws/raw/*").await?;
-    info!("ipc/db psubscribed kap/aws/raw/* ok");
-    sub_conn.psubscribe("kap/aws/shadow/*").await?;
-    info!("ipc/db psubscribed kap/aws/shadow/* ok");
+    let topic = format!("{}/kap/aws/raw/*", thing_name);
+    sub_conn.psubscribe(&topic).await?;
+    info!("ipc/db psubscribed {} ok", &topic);
+    let topic = format!("{}/kap/aws/shadow/*", thing_name);
+    sub_conn.psubscribe(&topic).await?;
+    info!("ipc/db psubscribed {} ok", &topic);
 
-    sub_conn.psubscribe("kap/cmp/publish/jobs/update/*").await?;
-    info!("ipc/db psubscribed kap/cmp/publish/jobs/update/* ok");
+    let topic = format!("{}/kap/cmp/publish/jobs/update/*", thing_name);
+    sub_conn.psubscribe(&topic).await?;
+    info!("ipc/db psubscribed {} ok", &topic);
 
     if let Some(pull_topic) = pull_topic {
         let _: Vec<Result<(), rumqttc::ClientError>> =
@@ -361,16 +318,18 @@ pub async fn mqtt_dedicated_start(
 
 #[instrument(name = "mqtt::dedicated", skip(sub_conn, db_chan))]
 pub async fn mqtt_dedicated_create_start(
-    endpoint: &str,
-    dedicated: &AwsIotDedicatedConfig,
+    cfg: &KdaemonConfig,
+    dedicated: Option<&RuleAwsIotDedicatedConfig>,
     sub_conn: redis::aio::PubSub,
     db_chan: mpsc::Sender<DbCommand>,
 ) -> Result<()> {
-    if let Some(t) = dedicated.thing_name.as_ref() {
+    if let Some(t) = cfg.cmp.thing.as_ref() {
         let thing_name = t.clone();
-        let pull_topic = dedicated.pull_topic.clone();
+        let pull_topic = dedicated
+            .and_then(|d| d.pull_topic.clone())
+            .or_else(|| None);
 
-        if let Ok(iot) = mqtt_dedicated_create(endpoint, dedicated).await {
+        if let Ok(iot) = mqtt_dedicated_create(&cfg.cmp).await {
             mqtt_dedicated_start(sub_conn, db_chan, thing_name, iot, pull_topic).await
         } else {
             Err(anyhow!("mqtt dedicated create fail"))
@@ -642,4 +601,18 @@ async fn post_iot_publish_msg(
         }
     }
     Ok(())
+}
+
+#[tokio::test]
+async fn test_mac_lowercase() {
+    let mac = "a1:A1:b1:B2:c1:C2".to_string();
+    /*let mac = mac.chars()
+      .filter(|c| c == &':')
+      .map(|c| c.to_ascii_lowercase())
+      .collect::<String>();*/
+    let mac = mac.split(':')
+        .map(|e| e.to_ascii_lowercase())
+        .collect::<String>();
+
+    assert_eq!(mac, "a1a1b1b2c1b2");
 }

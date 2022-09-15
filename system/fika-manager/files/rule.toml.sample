@@ -1,6 +1,4 @@
 [core]
-database = "redis://127.0.0.1:6379"
-version = "0.1.0"
 thirdparty = "longdong2"
 
 [honest]
@@ -9,23 +7,14 @@ fail_cycle = {secs = 301, nanos = 0 }
 path = "/etc/fika_manager/boss_token.sh"
 
 [aws]
-endpoint = "a2dl0okey4lms3-ats.iot.ap-northeast-1.amazonaws.com"
-
 [aws.provision]
-ca = "/userdata/AmazonRootCA1.pem"
-cert = "/userdata/provisioning-claim.certificate.pem"
-key = "/userdata/provisioning-claim.private-key.pem"
-template = "FleetProvisioningMacPostfixTemplate"
+ca = "/etc/fika_manager/AmazonRootCA1.pem"
+cert = "/etc/fika_manager/bootstrap-online-ap.certificate.pem"
+private = "/etc/fika_manager/bootstrap-online-ap.private.key"
+template = "RealFleetProvisioningTemplate"
 thing_prefix = "LD2"
-mac_address = "00037fad4e32"
-serial_number = "000000000001"
-sku = "TW"
 
 [aws.dedicated]
-#thing_name = "LD2_00037fad4e32"
-ca = "/userdata/AmazonRootCA1.pem"
-cert = "/userdata/dedicated.certificate.pem"
-key = "/userdata/dedicated.private-key.pem"
 pull_topic = [ "name/ap-info", "name/remote-manage", "name/honest-challenge", "name/pairing", "name/captive-portal" ]
 
 [[subscribe]]

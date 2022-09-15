@@ -15,6 +15,7 @@ pub use kap_cmp::CmpMenu;
 pub mod kap_core;
 pub use kap_core::CoreMenu;
 
+pub mod kap_daemon;
 pub mod aws_iot;
 pub mod recovery;
 pub use self::recovery::{recovery, RecoveryOpt};

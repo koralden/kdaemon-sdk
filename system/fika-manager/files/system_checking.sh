@@ -9,11 +9,9 @@ check_ntp() {
 
 check_boss_ap_token() {
     apToken=$(redis-cli GET kap.boss.ap.token $accesstokenAp)
-
     [ -n "$apToken" ] && return 0
-
-    . /etc/fika_manager/easy_setup.sh
-    get_boss_ap_token
+    code=400
+    message="boss ap-access-token not ready"
 }
 
 #check_ntp

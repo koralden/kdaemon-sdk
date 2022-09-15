@@ -1,25 +1,12 @@
 #!/bin/sh
 
 . /etc/fika_manager/misc.sh
+load_kdaemon_toml
 
-fika_log debug "[$0] $@"
+format_thingname() {
+    eval "$(awk '/thing_prefix/ {print "thingPrefix="$3}' $RULE_TOML_PATH)"
+    thing="${thingPrefix}_$(echo $kdaemon_mac_address | sed 's,:,,g')"
+    sed "s,^.*thing.*$,thing = \"$thing\"," -i $KDAEMON_TOML_PATH
+}
 
-json=$1 && shift
-key=$1 && shift
-
-endpoint=$(echo $json | jq .endpoint)
-port=$(echo $json | jq -r .port)
-thing=$(echo $json | jq .thing)
-cert=$(echo $json | jq .cert)
-pkey=$(echo $json | jq .key)
-ca=$(echo $json | jq .ca)
-
-sed -i -e "s,port,xport," \
-    -e "s,endpoint  : .*$,endpoint  : $endpoint," \
-    -e "s,port      : .*$,port      : $port," \
-    -e "s,cert      : .*$,cert      : $cert," \
-    -e "s,key       : .*$,key       : $pkey," \
-    -e "s,ca        : .*$,ca        : $ca," \
-    -e "s,thing     : .*$,thing     : $thing," \
-    -e "s,xport,port," \
-    /etc/fika_iot_gateway/config.yaml
+[ -z "${kdaemon_thing}" -o "${kdaemon_thing}" = "CHANGEME" ] && format_thingname

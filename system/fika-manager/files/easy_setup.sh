@@ -112,36 +112,6 @@ wlan_cb() {
     fi
 }
 
-get_boss_ap_token() {
-    local kap_core kap_boss
-    local rootUrl accesstoken apTokenPath kapWallet
-    local json url
-    local apToken
-
-    kap_core=$(redis-cli --raw GET kap.core)
-    kap_boss=$(redis-cli --raw GET kap.boss)
-
-    rootUrl=$(echo $kap_boss | jq -r .root_url)
-    accessToken=$(echo $kap_boss | jq -r .access_token)
-    apTokenPath=$(echo $kap_boss | jq -r .ap_token_path)
-    kapWallet=$(echo $kap_core | jq -r .wallet_address)
-
-    url="${rootUrl}/${apTokenPath}?ap_wallet=${kapWallet}"
-    json=$(curl -s -H "ACCESSTOKEN:${accessToken}" -X GET ${url})
-    #my_log debug "curl ap_token $json"
-
-    if [ -n "$json" ]; then
-        code=$(echo $json | jq -r .code)
-        if [ "X$code" = "X200" ]; then
-            apToken=$(echo $json | jq -r .ap_token)
-            logger -s -t easy-setup -p info "kap.boss.ap.token as $apToken"
-            if [ -n "$apToken" ]; then
-                redis-cli SET kap.boss.ap.token $apToken
-            fi
-        fi
-    fi
-}
-
 cmp_wan() {
     local new_type orig_type new_username orig_username
     local new_password orig_password
@@ -214,8 +184,6 @@ main() {
 
     overwrite=$(echo $cfg | jq -r .password_overwrite)
     account_cb modify $overwrite "$ppassword"
-
-    get_boss_ap_token
 
     redis-cli SAVE
     redis-cli PUBLISH kdaemon.easy.setup.ack success

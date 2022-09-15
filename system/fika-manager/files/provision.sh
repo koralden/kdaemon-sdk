@@ -1,10 +1,13 @@
 #!/bin/sh
 
+. /etc/fika_manager/misc.sh
+load_kdaemon_toml
+
 [ -z "$docdir" ] && docdir="/etc/fika_manager"
 
 #[ -e /dev/log ] && logger -s -t fika-manager -p debug "[$0] docdir=$docdir"
 
-boss_owner_info() {
+deprecated_boss_owner_info() {
     local data info code wallet
 
     . /etc/fika_manager/hcs_honest_challenge.sh
@@ -19,7 +22,31 @@ boss_owner_info() {
     code=$(echo $info | jq -r .code)
     if [ "X$code" = "X200" ]; then
         wallet=$(echo $info | jq -r .data.user_wallet)
-        redis-cli SET kap.boss.ap.info $(echo $info | jq -rcM .data) 2>&1 >/dev/null
+        redis-cli SET kap.boss.ap.info "$(echo $info | jq -rcM .data)" 2>&1 >/dev/null
+        echo $wallet
+        return 0
+    else
+        redis-cli DEL kap.boss.ap.info 2>&1 >/dev/null
+        echo "null"
+        return 127
+    fi
+}
+
+boss_owner_info() {
+    local data info code wallet
+
+    #. /etc/fika_manager/hcs_honest_challenge.sh
+    #db_fetch
+    data=$(jq -rcM --null-input --arg wallet "${kdaemon_wallet_address}" '{"ap_wallet": $wallet}')
+
+    info=$(curl -s -H "ACCESSTOKEN:${kdaemon_access_token}" -H "ACCESSTOKEN-AP:${kdaemon_ap_access_token}" -H 'Content-Type: text/plain' -X GET --data-raw $data "${kdaemon_root_url}/${kdaemon_ap_info_path}")
+
+    fika_log debug "curl -s -H ACCESSTOKEN:${kdaemon_access_token} -H ACCESSTOKEN-AP:${kdaemon_ap_access_token} -H 'Content-Type: text/plain' -X GET --data-raw $data ${kdaemon_root_url}/${kdaemon_ap_info_path} => ${info}"
+
+    code=$(echo $info | jq -r .code)
+    if [ "X$code" = "X200" ]; then
+        wallet=$(echo $info | jq -r .data.user_wallet)
+        redis-cli SET kap.boss.ap.info "$(echo $info | jq -rcM .data)" 2>&1 >/dev/null
         echo $wallet
         return 0
     else
@@ -32,13 +59,13 @@ boss_owner_info() {
 provision_main() {
     sdk=$(fika-manager -V | awk '{print $2}')
     sdk=${sdk:-0.0.0}
-    wallet=$(redis-cli get kap.core | jq -rcM .wallet_address)
-    nickname=$(redis-cli get kap.por.config | jq -rcM .nickname)
+    wallet="${kdaemon_wallet_address}"
+    nickname="${kdaemon_nickname}"
     #XXX, jq response *null* if key no nexist
     # XXX, just disable until oss->cmp->kap ready
-    #owner=$(redis-cli GET kap.boss.ap.info | jq -rcM .user_wallet)
+    #owner="${kdaemon_user_wallet}"
     owner="null"
-    [ "$owner" = "null" ] && owner=$(boss_owner_info)
+    [ -z "$owner" -o "X$owner" = "Xnull" ] && owner=$(boss_owner_info)
 
     jq -rcM --null-input \
         --arg sdk "$sdk" \

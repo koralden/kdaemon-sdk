@@ -1,0 +1,20 @@
+[core]
+pre="/etc/fika_manager/factory/pre_core.sh"
+post="/etc/fika_manager/factory/post_core.sh"
+key = "kap.core"
+
+[network]
+post="/etc/fika_manager/factory/post_wifi_ssid_by_uci.sh"
+key = "kdaemon.easy.setup"
+
+[por]
+post="/etc/fika_manager/factory/post_por.sh"
+key = "kap.por.config"
+
+[boss]
+post="/etc/fika_manager/factory/post_boss.sh"
+key = "kap.boss"
+
+[cmp]
+post="/etc/fika_manager/factory/post_cmp.sh"
+key = "kap.cmp"

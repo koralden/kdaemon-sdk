@@ -15,15 +15,14 @@ start() {
             tries=$(expr $tries + 1)
             printf "."
         done
-        if [ $(redis-cli --raw EXISTS "kap.core.done") -eq 0 ]; then
-            printf "Starting fika-manager-recovery: "
+        if [ $(redis-cli --raw EXISTS "kap.recovery.done") -eq 0 ]; then
+            printf "Starting fika-manager recovery: "
             umask 077
-            /usr/bin/fika-manager recovery -c /userdata/factory.toml
-            redis-cli SAVE
+            /usr/bin/fika-manager recovery && redis-cli SAVE
         fi
 	printf "Starting fika-manager: "
 	start-stop-daemon -S -q -c root:root -b \
-		-x /usr/bin/fika-manager -- daemon -c /etc/fika_manager/config.toml
+		-x /usr/bin/fika-manager -- daemon
 	[ $? = 0 ] && echo "OK" || echo "FAIL"
 }
 stop() {

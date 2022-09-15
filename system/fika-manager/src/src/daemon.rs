@@ -19,10 +19,16 @@ use std::collections::{BTreeMap, HashMap};
 use chrono::prelude::*;
 use std::path::PathBuf;
 use crate::aws_iot::{
-    mqtt_dedicated_create, mqtt_dedicated_create_start, mqtt_dedicated_start, mqtt_provision_task,
-    AwsIotDedicatedConfig, AwsIotProvisionConfig,
+    mqtt_dedicated_create, mqtt_dedicated_create_start,
+    mqtt_dedicated_start, mqtt_provision_task,
+};
+use crate::aws_iot::{
+    RuleAwsIotDedicatedConfig, RuleAwsIotProvisionConfig,
 };
 use crate::{publish_message, set_message, DbCommand};
+use crate::kap_daemon::{
+    KdaemonConfig/*, KCoreConfig, KBossConfig, KCmpConfig,*/
+};
 
 #[derive(Debug,Args)]
 #[clap(
@@ -33,40 +39,52 @@ pub struct DaemonOpt {
     #[clap(
         short = 'c',
         long = "config",
-        default_value = "/etc/fika_manager/config.toml"
+        default_value = "/userdata/kdaemon.toml"
     )]
     config: String,
+    #[clap(
+        short = 'r',
+        long = "rule",
+        default_value = "/etc/fika_manager/rule.toml"
+    )]
+    rule: String,
     #[clap(long = "log-level", default_value = "info")]
     log_level: String,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-struct Config {
-    core: ConfigCore,
-    subscribe: Option<Vec<ConfigSubscribe>>,
-    task: Option<Vec<ConfigTask>>,
-    honest: Option<HonestConfig>,
-    aws: Option<AwsIotConfig>,
+struct RuleConfig {
+    core: RuleConfigCore,
+    subscribe: Option<Vec<RuleConfigSubscribe>>,
+    task: Option<Vec<RuleConfigTask>>,
+    honest: Option<RuleHonestConfig>,
+    aws: Option<RuleAwsIotConfig>,
+}
+
+impl RuleConfig {
+    pub async fn build_from(path: &str) -> Result<Self> {
+        let cfg = fs::read_to_string(path).await?;
+        toml::from_str(&cfg).or_else(|e| Err(anyhow!(e)))
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-struct ConfigCore {
-    database: String,
-    version: String,
+struct RuleConfigCore {
+    thirdparty: String,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-struct ConfigSubscribe {
+struct RuleConfigSubscribe {
     topic: String,
     path: PathBuf,
 }
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
 #[allow(dead_code)]
-struct ConfigTask {
+struct RuleConfigTask {
     topic: String,
     path: PathBuf,
     start_at: Option<Duration>,
@@ -77,7 +95,7 @@ struct ConfigTask {
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-struct HonestConfig {
+struct RuleHonestConfig {
     ok_cycle: Duration,
     fail_cycle: Duration,
     path: PathBuf,
@@ -86,10 +104,9 @@ struct HonestConfig {
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-struct AwsIotConfig {
-    endpoint: String,
-    provision: Option<AwsIotProvisionConfig>,
-    dedicated: Option<AwsIotDedicatedConfig>,
+struct RuleAwsIotConfig {
+    provision: Option<RuleAwsIotProvisionConfig>,
+    dedicated: Option<RuleAwsIotDedicatedConfig>,
 }
 
 #[derive(Debug)]
@@ -97,7 +114,8 @@ struct AwsIotConfig {
 struct State {
     //publish_conn: redis::aio::Connection,
     //pubsub_conn: redis::aio::PubSub,
-    cfg: Config,
+    cfg: KdaemonConfig,
+    rule: RuleConfig,
 }
 
 async fn conn_access_task(
@@ -154,7 +172,7 @@ async fn subscribe_task(
     let subscribe;
     {
         let mut state = shared.lock().unwrap();
-        subscribe = state.cfg.subscribe.take();
+        subscribe = state.rule.subscribe.take();
     }
     if let Some(vs) = subscribe {
         let mut entries: HashMap<String, PathBuf> = HashMap::new();
@@ -342,10 +360,11 @@ async fn publish_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>
         ),
     > = HashMap::new();
     if let Ok(state) = shared.lock() {
-        if let Some(ps) = &state.cfg.task {
+        let thing = state.cfg.cmp.thing.as_ref().unwrap();
+        if let Some(ps) = &state.rule.task {
             for p in ps {
                 entries.insert(
-                    p.topic.clone(),
+                    format!("{}/{}", thing, p.topic),
                     (p.path.clone(), p.start_at, p.period, p.db_publish, p.db_set),
                 );
             }
@@ -491,17 +510,18 @@ pub async fn daemon(opt: DaemonOpt) -> Result<(), MyError> {
 
     //debug!("config as {}", opt.config);
 
-    let cfg = fs::read_to_string(opt.config).await?;
-    let cfg: Config = toml::from_str(&cfg)?;
+    let rule: RuleConfig = RuleConfig::build_from(&opt.rule).await?;
+    let cfg: KdaemonConfig = KdaemonConfig::build_from(&opt.config).await?;
     //debug!("cfg content as {:#?}", cfg);
 
     let (chan_tx, chan_rx) = mpsc::channel::<DbCommand>(32);
-    //let url: &str = &cfg.core.database;
-    let cache = redis::Client::open(&*cfg.core.database)?;
+    let url: &str = &cfg.core.database;
+    let cache = redis::Client::open(url)?;
     let shared = Arc::new(Mutex::new(State {
         //publish_conn: cache.get_async_connection().await?,
         //pubsub_conn: cache.get_async_connection().await?.into_pubsub(),
         cfg,
+        rule,
     }));
 
     let _conn_task = tokio::spawn(conn_access_task(
@@ -556,7 +576,7 @@ async fn honest_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>
     let mut cmd_path = PathBuf::from("/etc/fika_manager/boss_token.sh");
     let mut disable = false;
     if let Ok(state) = shared.lock() {
-        if let Some(honest) = &state.cfg.honest {
+        if let Some(honest) = &state.rule.honest {
             fail_cycle = honest.fail_cycle;
             ok_cycle = honest.ok_cycle;
             cmd_path = honest.path.clone();
@@ -623,34 +643,38 @@ async fn mqtt_task(
     shared: Arc<Mutex<State>>,
 ) {
     if let Ok(state) = shared.lock() {
-        debug!("aws-iot-config {:?}", state.cfg.aws);
+        debug!("aws-iot-config {:?}", state.rule.aws);
     }
 
-    let cfg: Option<AwsIotConfig> = if let Ok(mut state) = shared.lock() {
-        state.cfg.aws.take()
+    let (kcfg, rule) = if let Ok(mut state) = shared.lock() {
+        (Some(state.cfg.clone()), state.rule.aws.take())
     } else {
-        None
+        (None, None)
     };
 
-    if let Some(cfg) = cfg {
-        match (cfg.dedicated, cfg.provision) {
-            (Some(mut dedicated), Some(provision)) => {
-                let _ = dedicated.apply_thing_name(provision.generate_thing_name(None));
-                match mqtt_dedicated_create(&cfg.endpoint, &dedicated).await {
+    if kcfg.is_none() {
+        error!("kdaemon config not satisfy");
+        return;
+    }
+    let kcfg = kcfg.unwrap();
+
+    if let Some(rule) = rule {
+        match (rule.dedicated, rule.provision) {
+            (Some(dedicated), Some(provision)) => {
+                let cfg = &kcfg;
+                match mqtt_dedicated_create(&cfg.cmp).await {
                     Err(_) => {
                         match mqtt_provision_task(
-                            &cfg.endpoint,
-                            provision,
-                            Some(dedicated),
+                            cfg, provision,
                             db_chan.clone(),
                         )
                         .await
                         {
-                            Ok(dedicated) => {
+                            Ok(_) => {
                                 let db_chan = db_chan.clone();
                                 if let Err(e) = mqtt_dedicated_create_start(
-                                    &cfg.endpoint,
-                                    &dedicated,
+                                    cfg,
+                                    Some(&dedicated),
                                     sub_conn,
                                     db_chan,
                                 )
@@ -665,7 +689,7 @@ async fn mqtt_task(
                         }
                     }
                     Ok(iot) => {
-                        let thing_name = dedicated.thing_name.as_ref().unwrap();
+                        let thing_name = cfg.cmp.thing.as_ref().unwrap();
                         if mqtt_dedicated_start(
                             sub_conn,
                             db_chan.clone(),
@@ -684,14 +708,13 @@ async fn mqtt_task(
                 }
             }
             (None, Some(provision)) => {
-                let thing_name = provision.generate_thing_name(None);
-                match mqtt_provision_task(&cfg.endpoint, provision, None, db_chan.clone()).await {
-                    Ok(mut dedicated) => {
-                        let _ = dedicated.apply_thing_name(thing_name);
+                let cfg = &kcfg;
+                match mqtt_provision_task(cfg, provision, db_chan.clone()).await {
+                    Ok(_) => {
                         let db_chan = db_chan.clone();
                         if let Err(e) = mqtt_dedicated_create_start(
-                            &cfg.endpoint,
-                            &dedicated,
+                            cfg,
+                            None,
                             sub_conn,
                             db_chan,
                         )
