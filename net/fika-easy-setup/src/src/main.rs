@@ -51,7 +51,7 @@ use fika_easy_setup::kap_daemon::{KdaemonConfig, KNetworkConfig, KPorConfig};
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.3"
+    version = "0.0.4"
 )]
 struct Opt {
     /// set the listen addr
@@ -177,7 +177,7 @@ async fn private_service(
             get(get_session_auth).post(post_session_auth),
         )
         .route(API_PATH_PAIRING, get(get_pairing).post(post_pairing))
-        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status))
+        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status_private))
         .route(
             API_PATH_SETUP_EASY,
             get(show_network_setup).post(update_network_setup),
@@ -237,7 +237,7 @@ async fn public_service(
             get(honest_challenge).post(update_honest_challenge),
         )
         .route(API_PATH_OPENNDS_FAS, get(public_opennds_fas))
-        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status))
+        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status_public))
         .layer(Extension(cache))
         .layer(Extension(server_ctx))
         .into_make_service_with_connect_info::<SocketAddr>();
@@ -657,6 +657,23 @@ struct KApOtp {
     code: u16,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct BossApInfoData {
+    pub ap_wallet: Option<String>,
+    pub user_wallet: Option<String>,
+    pub device_nickname: Option<String>,
+    pub location_latitude: Option<String>,
+    pub location_longitude: Option<String>,
+    pub location_zip: Option<String>,
+    pub location_address: Option<String>,
+    pub location_hint: Option<String>,
+    pub init_time: Option<String>,
+    pub update_time: Option<String>,
+    pub last_hb_time: Option<String>,
+    pub user_nickname: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct InternalServerCtx {
     otp: String,
@@ -855,19 +872,7 @@ impl ServerCtx {
           }*/
     }
 
-    async fn get_boss_owner(&self, _conn: Result<redis::aio::Connection>) -> Result<String> {
-        /*XXX, just disable until oss->cmp->kap ready
-         * if let Ok(conn) = conn {
-            if let Ok(info) = self.db_boss_owner(conn).await {
-                //return info.user_wallet
-                //    .ok_or(anyhow!("user-wallet non-exist"));
-                if info.user_wallet.is_some() {
-                    return Ok(info.user_wallet.unwrap());
-                }
-            }
-        }*/
-
-        /* trandition BOSS/polling flow */
+    async fn get_boss_api_info(&self) -> Result<BossApInfoData> {
         let url = format!("{}/{}", &self.api_url, &self.ap_info_path);
 
         let mut map = HashMap::new();
@@ -890,19 +895,57 @@ impl ServerCtx {
         match serde_json::from_value::<u16>(response["code"].take()) {
             Ok(code) => {
                 if code == 200 {
-                    Ok(
-                        serde_json::from_value::<String>(response["data"]["user_wallet"].take())
-                            .unwrap(),
-                    )
+                    serde_json::from_value::<BossApInfoData>(response["data"].take())
+                        .or_else(|e|
+                                 Err(anyhow::anyhow!(format!("invalid response format({})", e))))
                 } else {
-                    Err(anyhow::anyhow!(serde_json::from_value::<String>(
-                        response["message"].take()
-                    )
-                    .unwrap()))
+                    let m = serde_json::from_value::<String>(response["message"].take())
+                        .unwrap_or("invalid response format(no message)".to_string());
+                    Err(anyhow::anyhow!(m))
                 }
             }
-            _ => Err(anyhow::anyhow!("unknown error".to_owned())),
+            _ => Err(anyhow::anyhow!("invalid response format(no code)".to_owned())),
         }
+    }
+
+    async fn cache_boss_api_info(&self, conn: Result<redis::aio::Connection>) -> Result<BossApInfoData> {
+        let key_set = "kap.boss.ap.info";
+        if let Ok(mut conn) = conn {
+            if let Ok(bs) = conn.get::<&str, String>(key_set).await {
+                /* updted via MQTT/subscribe in fika-manager */
+                serde_json::from_str::<BossApInfoData>(&bs)
+                    .or(Err(anyhow!("json convert fail")))
+            } else {
+                /*XXX trandition BOSS/polling flow,
+                * just enable until oss->cmp->kap ready */
+                match self.get_boss_api_info().await {
+                    Ok(info) => {
+                        let msg = serde_json::to_string(&info).unwrap();
+                        let ipc_key = "boss/ap/info";
+                        if let Err(e) = conn.publish::<&str, &str, usize>(ipc_key, &msg).await {
+                            error!("ipc publish {ipc_key}/{:?} error - {:?}",
+                                   &msg, e);
+                        }
+                        Ok(info)
+                    },
+                    Err(e) => {
+                        error!("call get_boss_api_info() fail - {e}");
+                        Err(e)
+                    },
+                }
+            }
+        } else {
+            self.get_boss_api_info().await
+        }
+    }
+
+    async fn get_boss_owner(&self, conn: Result<redis::aio::Connection>) -> Result<String> {
+        if let Ok(info) = self.cache_boss_api_info(conn).await {
+            if info.user_wallet.is_some() {
+                return Ok(info.user_wallet.unwrap());
+            }
+        }
+        Err(anyhow::anyhow!("user-wallet nonexist"))
     }
 
     fn as_app_query(&self, otp: Option<String>) -> Result<KAppOtp> {
@@ -1202,20 +1245,14 @@ struct PairingStatus {
     owner_wallet: Option<String>,
     ap_wallet: Option<String>,
     nickname: Option<String>,
+    private: bool,
 }
 
 async fn get_pairing_status(
+    mut status: PairingStatus,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
-    let mut status = PairingStatus {
-        code: 200, /* StatusCode::INTERNAL_SERVER_ERROR */
-        paired: false,
-        owner_wallet: None,
-        ap_wallet: Some(server_ctx.wallet.clone()),
-        nickname: None,
-    };
-
     let db_conn = cache
         .get_async_connection()
         .await
@@ -1233,6 +1270,42 @@ async fn get_pairing_status(
     }
 
     (StatusCode::OK, Json(status))
+}
+
+async fn get_pairing_status_private(
+    Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
+) -> impl IntoResponse {
+    let status = PairingStatus {
+        code: 200, /* StatusCode::INTERNAL_SERVER_ERROR */
+        paired: false,
+        owner_wallet: None,
+        ap_wallet: Some(server_ctx.wallet.clone()),
+        nickname: None,
+        private: true,
+    };
+
+    get_pairing_status(status,
+        Extension(cache),
+        Extension(server_ctx)).await
+}
+
+async fn get_pairing_status_public(
+    Extension(cache): Extension<redis::Client>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
+) -> impl IntoResponse {
+    let status = PairingStatus {
+        code: 200, /* StatusCode::INTERNAL_SERVER_ERROR */
+        paired: false,
+        owner_wallet: None,
+        ap_wallet: Some(server_ctx.wallet.clone()),
+        nickname: None,
+        private: false,
+    };
+
+    get_pairing_status(status,
+        Extension(cache),
+        Extension(server_ctx)).await
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1620,8 +1693,8 @@ async fn public_opennds_fas(
     req: Option<Query<String>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    dbg!(req);
-    dbg!(addr);
+    dbg!(&req);
+    dbg!(&addr);
 
     Html(FAS_TEMP).into_response()
 }

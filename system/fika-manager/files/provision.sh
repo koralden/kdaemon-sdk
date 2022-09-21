@@ -50,7 +50,6 @@ boss_owner_info() {
         echo $wallet
         return 0
     else
-        redis-cli DEL kap.boss.ap.info 2>&1 >/dev/null
         echo "null"
         return 127
     fi

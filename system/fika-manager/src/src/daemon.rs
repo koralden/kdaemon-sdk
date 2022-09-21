@@ -589,7 +589,7 @@ async fn honest_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>
         return;
     }
 
-    let mut when = Instant::now() + ok_cycle;
+    let mut when = Instant::now() + fail_cycle;
 
     loop {
         tokio::select! {

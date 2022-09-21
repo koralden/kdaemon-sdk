@@ -9,7 +9,7 @@ use fika_manager::{DaemonOpt, daemon};
 #[clap(
     name = "fika-manager",
     about = "FIKA manager to interactive with platform",
-    version = "0.0.3"
+    version = "0.0.4"
 )]
 struct Cli {
     #[clap(subcommand)]

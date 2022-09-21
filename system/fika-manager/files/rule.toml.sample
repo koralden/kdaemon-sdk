@@ -2,8 +2,8 @@
 thirdparty = "longdong2"
 
 [honest]
-ok_cycle = {secs = 13, nanos = 0 }
-fail_cycle = {secs = 301, nanos = 0 }
+ok_cycle = {secs = 300, nanos = 0 }
+fail_cycle = {secs = 10, nanos = 0 }
 path = "/etc/fika_manager/boss_token.sh"
 
 [aws]
@@ -32,6 +32,10 @@ path = "/etc/fika_manager/captive-portal.sh"
 [[subscribe]]
 topic = "aws/kap/shadow/name/ap-info/state"
 path = "/etc/fika_manager/cmp_ap_info.sh"
+
+[[subscribe]]
+topic = "boss/ap/info"
+path = "/etc/fika_manager/boss_ap_info.sh"
 
 #[[subscribe]]
 #topic = "aws/kap/shadow/name/remote-manage/state"
