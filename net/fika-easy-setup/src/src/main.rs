@@ -45,8 +45,7 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fika_easy_setup::fas;
-use fika_easy_setup::kap_boss::{BossApInfoData, BossMenu};
-use fika_easy_setup::kap_core::CoreMenu;
+use fika_easy_setup::kap_daemon::{KdaemonConfig, KNetworkConfig, KPorConfig};
 
 #[derive(Parser, Debug, Clone)]
 #[clap(
@@ -93,14 +92,10 @@ struct Opt {
     #[clap(long = "private-key")]
     private_key: Option<String>,
 
-    #[clap(long = "api-url")]
-    api_url: Option<String>,
     #[clap(long = "access-token")]
     access_token: Option<String>,
     #[clap(long = "access-token-ap")]
     access_token_ap: Option<String>,
-    #[clap(long = "otp-path")]
-    otp_path: Option<String>,
     #[clap(long = "mac-address")]
     mac_address: Option<String>,
 
@@ -110,6 +105,9 @@ struct Opt {
     fas_key: String,
     #[clap(long = "auth-dir", default_value = "opennds_auth")]
     auth_dir: String,
+
+    #[clap(short = 'c', long = "config", default_value = "/userdata/kdaemon.toml")]
+    config: String,
 }
 
 static COOKIE_NAME: &str = "SESSION";
@@ -138,6 +136,9 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let server_ctx = ServerCtx::build_from(&opt).await;
+    let server_ctx = Arc::new(server_ctx);
+
     let fas = tokio::spawn(fas::fas_service(
         opt.public_addr.clone(),
         opt.fas_port,
@@ -146,14 +147,10 @@ async fn main() {
         opt.auth_dir.clone(),
     ));
 
-    let server_ctx = create_service_ctx(&opt).await;
-    let server_ctx = Arc::new(server_ctx);
-
     let http = tokio::spawn(public_service(
         opt.public_addr.clone(),
         opt.public_port,
         opt.redis_addr.clone(),
-        opt.wallet_addr.clone(),
         opt.certificate.clone(),
         opt.private_key.clone(),
         server_ctx.clone(),
@@ -161,57 +158,6 @@ async fn main() {
     let https = tokio::spawn(private_service(opt, server_ctx.clone()));
 
     let _ = tokio::join!(https, http, fas);
-}
-
-async fn create_service_ctx(opt: &Opt) -> ServerCtx {
-    let redis_addr = format!("redis://{}/", opt.redis_addr);
-    let cache = redis::Client::open(redis_addr).unwrap();
-
-    let mut api_url = opt.api_url.clone();
-    let mut access_token = opt.access_token.clone();
-    let mut otp_path = opt.otp_path.clone();
-    let mut wallet = opt.wallet_addr.clone();
-    let mac = opt.mac_address.clone();
-    let mut access_token_ap = opt.access_token_ap.clone();
-    let mut ap_info_path = None;
-
-    if let Ok(mut db_conn) = cache.get_async_connection().await {
-        let value = db_conn
-            .get::<&str, String>("kap.core")
-            .await
-            .or(Err("kap.core not found"))
-            .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
-        if let Ok(value) = value {
-            wallet = wallet.or(Some(value.wallet_address));
-        }
-        let value = db_conn
-            .get::<&str, String>("kap.boss")
-            .await
-            .or(Err("kap.boss not found"))
-            .and_then(|s| serde_json::from_str::<BossMenu>(&s).or(Err("json convert fail")));
-        if let Ok(value) = value {
-            api_url = api_url.or(Some(value.root_url));
-            access_token = access_token.or(Some(value.access_token));
-            otp_path = otp_path.or(Some(value.otp_path));
-            ap_info_path = Some(value.ap_info_path);
-        }
-        let value = db_conn.get::<&str, String>("kap.boss.ap.token").await;
-        if let Ok(value) = value {
-            access_token_ap = access_token_ap.or(Some(value));
-        }
-    }
-
-    ServerCtx::new(
-        api_url,
-        otp_path,
-        ap_info_path,
-        access_token,
-        access_token_ap,
-        wallet,
-        mac,
-        opt.client_username.clone(),
-        opt.client_password.clone(),
-    )
 }
 
 async fn private_service(
@@ -278,24 +224,12 @@ async fn public_service(
     public_addr: String,
     public_port: u16,
     redis_addr: String,
-    mut wallet: Option<String>,
     cert: Option<String>,
     private_key: Option<String>,
     server_ctx: Arc<ServerCtx>,
 ) {
     let redis_addr = format!("redis://{}/", redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
-
-    if let Ok(mut db_conn) = cache.get_async_connection().await {
-        let value = db_conn
-            .get::<&str, String>("kap.core")
-            .await
-            .or(Err("kap.core not found"))
-            .and_then(|s| serde_json::from_str::<CoreMenu>(&s).or(Err("json convert fail")));
-        if let Ok(value) = value {
-            wallet = wallet.or(Some(value.wallet_address));
-        }
-    }
 
     let app = Router::new()
         .route(
@@ -305,7 +239,6 @@ async fn public_service(
         .route(API_PATH_OPENNDS_FAS, get(public_opennds_fas))
         .route(API_PATH_PAIRING_STATUS, get(get_pairing_status))
         .layer(Extension(cache))
-        .layer(Extension(wallet.unwrap()))
         .layer(Extension(server_ctx))
         .into_make_service_with_connect_info::<SocketAddr>();
 
@@ -551,17 +484,6 @@ enum WanType {
     Wwan,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[allow(dead_code)]
-struct NetworkConfig {
-    wan_type: u8,
-    wan_username: Option<String>,
-    wan_password: Option<String>,
-    wifi_ssid: String,
-    wifi_password: Option<String>,
-    password_overwrite: Option<String>,
-}
-
 struct AuthRedirect(bool);
 
 impl IntoResponse for AuthRedirect {
@@ -577,29 +499,22 @@ impl IntoResponse for AuthRedirect {
 
 async fn show_network_setup(
     user: Option<SessionUser>,
-    Extension(cache): Extension<redis::Client>,
     Extension(server): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     if server.need_login(user).is_err() {
         return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
 
-    let mut cfg = String::from(
-        r#"{"wan_type":0,"wan_username":"example","wan_password":"example","wifi_ssid":"k-private","wifi_password":"changeme","password_overwrite":"on"}"#,
-    );
-    if let Ok(mut conn) = cache.get_async_connection().await {
-        cfg = conn
-            .get::<&str, String>(KEY_KAP_SYSTEM_CONFIG)
-            .await
-            .unwrap_or_else(|_| "{}".into());
-    }
+    let cfg = server.get_network_cfg();
+    let cfg = serde_json::to_string(&cfg.unwrap()).unwrap();
+
     Html(EASY_SETUP_TEMP.replace("{{ getJson }}", &cfg)).into_response()
 }
 
 // Valid user session required. If there is none, redirect to the auth page
 async fn update_network_setup(
     user: Option<SessionUser>,
-    Form(cfg): Form<NetworkConfig>,
+    Form(cfg): Form<KNetworkConfig>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
@@ -608,8 +523,11 @@ async fn update_network_setup(
     }
 
     //dbg!(&cfg);
-    let ipc_key = KEY_KAP_SYSTEM_CONFIG;
+    if server_ctx.set_network_cfg(&cfg).is_err() {
+        error!("[internal] daemon-config update network fail");
+    }
 
+    let ipc_key = KEY_KAP_SYSTEM_CONFIG;
     let msg = match serde_json::to_string(&cfg) {
         Ok(c) => c,
         Err(e) => {
@@ -630,8 +548,7 @@ async fn update_network_setup(
                 return get_result_emoji("Setup Done", "rocket").await.into_response();
             }
         }
-
-        conn.set::<&str, &str, String>(ipc_key, &msg)
+conn.set::<&str, &str, String>(ipc_key, &msg)
             .await
             .unwrap();
         conn.publish::<&str, &str, usize>(ipc_key, &msg)
@@ -762,43 +679,132 @@ struct ServerCtx {
     login_password: Option<String>,
 
     internal: Mutex<InternalServerCtx>,
+    daemon_cfg: Mutex<Option<KdaemonConfig>>,
 }
 
 impl ServerCtx {
-    fn new(
-        api_url: Option<String>,
-        otp_path: Option<String>,
-        ap_info_path: Option<String>,
-        access_token: Option<String>,
-        access_token_ap: Option<String>,
-        wallet: Option<String>,
-        mac: Option<String>,
-        login_name: Option<String>,
-        login_password: Option<String>,
-    ) -> Self {
-        ServerCtx {
-            api_url: api_url.map_or("https://oss-api.k36588.info".to_owned(), |v| v),
-            access_token: access_token.map_or("ce18d7a0940719a00da82448b38c90b2".to_owned(), |v| v),
-            access_token_ap: access_token_ap
-                .map_or("02ec7a905b70689d9b30c6118fd1e62f".to_owned(), |v| v),
-            otp_path: otp_path.map_or("v0/ap/otp".to_owned(), |v| v),
-            ap_info_path: ap_info_path.map_or("v0/ap/info".to_owned(), |v| v),
-            wallet: wallet.map_or(
-                "5KaELZtvrm7sW4pxkBavKkcX7Mx2j5Zg6W8hYXhzoLxT".to_owned(),
-                |v| v,
-            ),
-            mac: mac.map_or("a1:a2:33:44:55:66".to_string(), |v| v),
+    async fn build_from(opt: &Opt) -> Self {
+        let daemon_cfg = KdaemonConfig::build_from(&opt.config)
+            .await
+            .ok();
 
-            login_name,
-            login_password,
+        let wallet = opt.wallet_addr.as_ref()
+            .map_or(daemon_cfg.as_ref()
+                    .map_or("CHANGEME".to_string(), |c| c.core.wallet_address.clone()),
+                    |w| w.clone());
+
+        let mac = opt.mac_address.as_ref()
+            .map_or(daemon_cfg.as_ref()
+                    .map_or("CHANGEME".to_string(), |c| c.core.mac_address.clone()),
+                    |m| m.clone());
+
+        let access_token = opt.access_token.as_ref()
+            .map_or(daemon_cfg.as_ref()
+                    .map_or("CHANGEME".to_string(), |c| c.boss.access_token.clone()),
+                    |t| t.clone());
+
+
+        let access_token_ap = opt.access_token_ap.as_ref()
+            .map_or(daemon_cfg.as_ref()
+                    .map_or("CHANGEME".to_string(), |c| c.boss.ap_access_token.as_ref()
+                            .map_or("CHANGEME".to_string(), |t| t.clone())),
+                    |t| t.clone());
+
+        let api_url = daemon_cfg.as_ref()
+            .map_or("CHANGEME".to_string(), |c| c.boss.root_url.clone());
+
+        let otp_path = daemon_cfg.as_ref()
+            .map_or("CHANGEME".to_string(), |c| c.boss.otp_path.clone());
+
+        let ap_info_path = daemon_cfg.as_ref()
+            .map_or("CHANGEME".to_string(), |c| c.boss.ap_info_path.clone());
+
+        ServerCtx {
+            api_url,
+            access_token,
+            access_token_ap,
+            otp_path,
+            ap_info_path,
+            wallet,
+            mac,
+            login_name: opt.client_username.clone(),
+            login_password: opt.client_password.clone(),
 
             internal: Mutex::new(InternalServerCtx {
                 otp: repeat_with(fastrand::alphanumeric).take(6).collect(),
                 invalid_time: Utc::now(), /* + chrono::Duration::seconds(300)*/
                 code: 404,
             }),
+
+            daemon_cfg: Mutex::new(daemon_cfg),
+
         }
     }
+
+    fn get_network_cfg(&self) -> Result<KNetworkConfig> {
+        let daemon_cfg = self.daemon_cfg.lock().unwrap();
+
+        let cfg = match *daemon_cfg {
+            Some(ref c) => c.network.clone(),
+            None => {
+                KNetworkConfig {
+                    password_overwrite: Some("on".to_string()),
+                    ..Default::default()
+                }
+            },
+        };
+
+        Ok(cfg)
+    }
+
+    fn set_network_cfg(&self, cfg: &KNetworkConfig) -> Result<()> {
+        if let Ok(mut daemon_cfg) = self.daemon_cfg.lock() {
+            match *daemon_cfg {
+                Some(ref mut c) => {
+                    c.network = cfg.clone();
+                    Ok(())
+                },
+                None => {
+                    Err(anyhow!("KDaemonConfig not exist!"))
+                },
+            }
+        } else {
+            Err(anyhow!("KDaemonConfig mutex lock fail"))
+        }
+    }
+
+    #[allow(dead_code)]
+    fn get_por_cfg(&self) -> Result<KPorConfig> {
+        let daemon_cfg = self.daemon_cfg.lock().unwrap();
+
+        let cfg = match *daemon_cfg {
+            Some(ref c) => c.por.clone(),
+            None => {
+                KPorConfig {
+                    ..Default::default()
+                }
+            },
+        };
+
+        Ok(cfg)
+    }
+
+    fn set_por_cfg(&self, cfg: &KPorConfig) -> Result<()> {
+        if let Ok(mut daemon_cfg) = self.daemon_cfg.lock() {
+            match *daemon_cfg {
+                Some(ref mut c) => {
+                    c.por = cfg.clone();
+                    Ok(())
+                },
+                None => {
+                    Err(anyhow!("KDaemonConfig not exist!"))
+                },
+            }
+        } else {
+            Err(anyhow!("KDaemonConfig mutex lock fail"))
+        }
+    }
+
 
     async fn get_mac_address(&self, skip: usize) -> String {
         let mac: String = self.mac.split(":")
@@ -847,16 +853,6 @@ impl ServerCtx {
 
               Ok(internal.otp.clone())
           }*/
-    }
-
-    async fn _db_boss_owner(&self, mut conn: redis::aio::Connection) -> Result<BossApInfoData> {
-        /* updted via MQTT/subscribe in fika-manager */
-        conn.get::<&str, String>("kap.boss.ap.info")
-            .await
-            .or(Err(anyhow!("kap.boss.ap.info not found")))
-            .and_then(|s| {
-                serde_json::from_str::<BossApInfoData>(&s).or(Err(anyhow!("json convert fail")))
-            })
     }
 
     async fn get_boss_owner(&self, _conn: Result<redis::aio::Connection>) -> Result<String> {
@@ -1123,8 +1119,8 @@ struct PairingCfg {
 }
 
 impl PairingCfg {
-    fn generate_por_cfg(&self) -> PorCfg {
-        PorCfg {
+    fn generate_por_cfg(&self) -> KPorConfig {
+        KPorConfig {
             state: true,
             nickname: Some(self.nickname.clone()),
         }
@@ -1148,20 +1144,14 @@ async fn post_pairing(
     let por = input.generate_por_cfg();
     let msg = serde_json::to_string(&por).unwrap();
 
-    let (code, message) = if let Ok(mut conn) = cache.get_async_connection().await {
-        if let Ok(orig) = conn.get::<&str, String>(ipc_key).await {
-            if orig != msg {
-                let key = format!("{}.old", ipc_key);
-                if let Err(e) = conn.set::<&str, &str, String>(&key, &orig).await {
-                    error!("ipc backup {:?}/{:?} error - {:?}",
-                           key, orig, e);
-                }
-            } else {
-                let resp = json!({"code": 200, "message": "do nothing"});
-                return (StatusCode::OK, Json(resp)).into_response();
-            }
+    if let Ok(orig) = server_ctx.get_por_cfg() {
+        if orig.nickname == por.nickname {
+            let resp = json!({"code": 200, "message": "do nothing"});
+            return (StatusCode::OK, Json(resp)).into_response();
         }
+    }
 
+    let (code, message) = if let Ok(mut conn) = cache.get_async_connection().await {
         match conn
             .set::<&str, &str, String>(ipc_key, &msg)
             .await
@@ -1342,10 +1332,11 @@ async fn honest_challenge(
     Path(challenger_id): Path<String>,
     Extension(cache): Extension<redis::Client>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Extension(wallet): Extension<String>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     info!("client ip-address {}", addr);
 
+    let wallet = &server_ctx.wallet;
     let mut challenge = HonestChallengeContent {
         gw_id: None,
         token: None,
@@ -1380,13 +1371,14 @@ async fn update_honest_challenge(
     Path(challenger_id): Path<String>,
     Json(hc_request): Json<HonestChallengeRequest>,
     Extension(cache): Extension<redis::Client>,
-    Extension(wallet): Extension<String>,
+    Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
     let mut resp = HonestChallengeResponse {
         code: 404, // not-found
     };
 
-    if &hc_request.gw_id != &wallet {
+    let wallet = &server_ctx.wallet;
+    if &hc_request.gw_id != wallet {
         resp.code = 405; //METHOD_NOT_ALLOWED;
         return (StatusCode::OK, Json(resp));
     }
@@ -1510,34 +1502,10 @@ async fn system_checking(
 
 const POR_TEMP: &str = std::include_str!("../templates/por.html");
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-struct PorCfg {
-    state: bool,
-    nickname: Option<String>,
-}
-
-async fn _por_config(
-    user: Option<SessionUser>,
-    Extension(cache): Extension<redis::Client>,
-) -> impl IntoResponse {
-    if user.is_none() {
-        Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response()
-    } else {
-        let mut cfg = String::from("{}");
-        if let Ok(mut conn) = cache.get_async_connection().await {
-            cfg = conn
-                .get::<&str, String>(KEY_KAP_POR_CONFIG)
-                .await
-                .unwrap_or_else(|_| "{}".into());
-        }
-        Html(POR_TEMP.replace("{{ getJSON }}", &cfg)).into_response()
-    }
-}
-
 static KEY_KAP_POR_CONFIG: &str = "kap.por.config";
 static KEY_KAP_SYSTEM_CONFIG: &str = "kdaemon.easy.setup";
 
-async fn ipc_get_por_config(ipc: Result<redis::aio::Connection>) -> Result<PorCfg> {
+async fn ipc_get_por_config(ipc: Result<redis::aio::Connection>) -> Result<KPorConfig> {
     let cfg = if let Ok(mut conn) = ipc {
         conn.get::<&str, String>(KEY_KAP_POR_CONFIG)
             .await
@@ -1545,13 +1513,13 @@ async fn ipc_get_por_config(ipc: Result<redis::aio::Connection>) -> Result<PorCf
     } else {
         r#"{"state":true,"nickname":null}"#.to_string()
     };
-    serde_json::from_str::<PorCfg>(&cfg).or_else(|e| Err(anyhow!("serde error {:?}", e)))
+    serde_json::from_str::<KPorConfig>(&cfg).or_else(|e| Err(anyhow!("serde error {:?}", e)))
 }
 
 // Valid user session required. If there is none, redirect to the auth page
 async fn por_wifi(
     user: Option<SessionUser>,
-    payload: Option<Json<PorCfg>>,
+    payload: Option<Json<KPorConfig>>,
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
 ) -> impl IntoResponse {
@@ -1563,6 +1531,17 @@ async fn por_wifi(
     let ipc_key = KEY_KAP_POR_CONFIG;
 
     if let Some(Json(input)) = payload {
+        if let Ok(orig) = server_ctx.get_por_cfg() {
+            if orig == input {
+                let resp = json!({"code": 200, "message": "do nothing"});
+                return (StatusCode::OK, Json(resp)).into_response();
+            }
+        }
+
+        if server_ctx.set_por_cfg(&input).is_err() {
+            error!("[internal] daemon-config update por fail");
+        }
+
         let msg = serde_json::to_string(&input).unwrap();
         let mut resp = "thumbs down".to_string();
 
@@ -1625,14 +1604,6 @@ async fn por_wifi(
 
         get_result_emoji("PoR service", &resp).await.into_response()
     } else {
-        /*let cfg = if let Ok(mut conn) = cache.get_async_connection().await {
-            conn.get::<&str, String>(KEY_KAP_POR_CONFIG)
-                .await
-                .unwrap_or_else(|_| r#"{"state":true,"nickname":"null"}"#.to_string())
-        } else {
-            r#"{"state":true,"nickname":"null"}"#.to_string()
-        };*/
-
         let conn = cache.get_async_connection().await.or_else(|e| Err(anyhow!("IPC async connect fail - {:?}", e)));
         let cfg = ipc_get_por_config(conn)
             .await

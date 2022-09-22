@@ -2,28 +2,15 @@ use anyhow::Result;
 use clap::Args;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-//use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::signal;
-//use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
-//use tokio::time::{self, Duration, Instant};
 use tracing::{debug, info, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-//use bytes::Bytes;
-//use std::iter::repeat_with;
-//use futures_util::stream::stream::StreamExt;
-//use futures_util::StreamExt as _;
-//use std::io;
-//use std::path::PathBuf;
 use async_trait::async_trait;
 
-use crate::kap_boss::BossMenu;
-use crate::kap_cmp::CmpMenu;
-use crate::kap_core::CoreMenu;
-use crate::kap_ez::{NetworkMenu, PorMenu};
+use crate::kap_daemon::{KCoreConfig, KNetworkConfig, KPorConfig, KBossConfig, KCmpConfig};
 
-//type DbConnection = Arc<Mutex<redis::aio::Connection>>;
 type DbConnection = redis::aio::Connection;
 
 #[derive(Args, Debug, Clone)]
@@ -151,7 +138,7 @@ trait FactoryAction {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct KapCoreConfig {
-    cfg: Option<CoreMenu>,
+    cfg: Option<KCoreConfig>,
     key: Option<String>,
     post: Option<String>,
     pre: Option<String>,
@@ -159,64 +146,6 @@ struct KapCoreConfig {
 
 #[async_trait]
 impl FactoryAction for KapCoreConfig {
-    /*#[instrument(name = "core-post", skip(self))]
-    async fn post(&self) -> Result<()> {
-        if let Some(post) = self.post {
-            let child = if let Some(key) = self.key {
-                if let Some(cfg) = self.cfg {
-                    let args = serde_json::to_string(&cfg)?;
-                    //debug!("args as {}", args);
-                    Command::new(&post).arg(&args).arg(key).spawn()?
-                } else {
-                    Command::new(&post).arg(key).spawn()?
-                }
-            } else {
-                if let Some(cfg) = self.cfg {
-                    let args = serde_json::to_string(&cfg)?;
-                    //debug!("args as {}", args);
-                    Command::new(&post).arg(&args).spawn()?
-                } else {
-                    Command::new(&post).spawn()?
-                }
-            };
-
-            let status = child.wait().await?;
-            info!("command {} run completed - {}", post, status);
-        }
-
-        Ok(())
-    }
-
-    #[instrument(name = "cor&e-pre", skip(self))]
-    async fn pre(&self) -> Result<()> {
-        if let Some(pre) = &self.pre {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("command {} run completed - {}", pre, status);
-        } else {
-            debug!("no command");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(name = "core-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
-        let key = &self.key;
-
-        let args = serde_json::to_string(&self.cfg)?;
-        debug!("args as {}", args);
-
-        db_conn.set(&key, &args).await?;
-
-        Ok(())
-    }*/
-
     fn get_key(&self) -> Option<&String> {
         self.key.as_ref()
     }
@@ -238,7 +167,7 @@ impl FactoryAction for KapCoreConfig {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct KapNetworkConfig {
-    cfg: Option<NetworkMenu>,
+    cfg: Option<KNetworkConfig>,
     key: Option<String>,
     post: Option<String>,
     pre: Option<String>,
@@ -246,50 +175,6 @@ struct KapNetworkConfig {
 
 #[async_trait]
 impl FactoryAction for KapNetworkConfig {
-    /*#[instrument(name = "network-post", skip(self))]
-    async fn post(&self) -> Result<()> {
-        let post = &self.post;
-        let args = serde_json::to_string(&self.cfg)?;
-        //debug!("args as {}", args);
-
-        let key = &self.key;
-        let mut child = Command::new(&post).arg(&args).arg(key).spawn()?;
-
-        let status = child.wait().await?;
-        info!("command {} run completed - {}", post, status);
-
-        Ok(())
-    }
-
-    #[instrument(name = "network-pre", skip(self))]
-    async fn pre(&self) -> Result<()> {
-        if let Some(pre) = &self.pre {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("pre - {} run completed - {}", pre, status);
-        } else {
-            debug!("no pre command");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(name = "network-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
-        let key = &self.key;
-        let args = serde_json::to_string(&self.cfg)?;
-        debug!("args as {}", args);
-
-        db_conn.set(&key, &args).await?;
-
-        Ok(())
-    }*/
-
     fn get_key(&self) -> Option<&String> {
         self.key.as_ref()
     }
@@ -311,7 +196,7 @@ impl FactoryAction for KapNetworkConfig {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct KapPorConfig {
-    cfg: Option<PorMenu>,
+    cfg: Option<KPorConfig>,
     key: Option<String>,
     post: Option<String>,
     pre: Option<String>,
@@ -319,57 +204,6 @@ struct KapPorConfig {
 
 #[async_trait]
 impl FactoryAction for KapPorConfig {
-    /*#[instrument(name = "por-post", skip(self))]
-    async fn post(&self) -> Result<()> {
-        if let Some(post) = &self.post {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&post).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("post - {} run completed - {}", post, status);
-        } else {
-            debug!("no post command");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(name = "por-pre", skip(self))]
-    async fn pre(&self) -> Result<()> {
-        if let Some(pre) = &self.pre {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("pre - {} run completed - {}", pre, status);
-        } else {
-            debug!("no pre command");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(name = "por-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
-        let key = &self.key;
-
-        let args = serde_json::to_string(&self.cfg)?;
-        debug!("args as {}", args);
-
-        db_conn.set(&key, &args).await?;
-
-        Ok(())
-    }
-
-    fn get_key(&self) -> &str {
-        return &self.key;
-    }*/
     fn get_key(&self) -> Option<&String> {
         self.key.as_ref()
     }
@@ -391,7 +225,7 @@ impl FactoryAction for KapPorConfig {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct KapBossConfig {
-    cfg: Option<BossMenu>,
+    cfg: Option<KBossConfig>,
     key: Option<String>,
     post: Option<String>,
     pre: Option<String>,
@@ -399,56 +233,6 @@ struct KapBossConfig {
 
 #[async_trait]
 impl FactoryAction for KapBossConfig {
-    /*#[instrument(name = "boss-post", skip(self))]
-    async fn post(&self) -> Result<()> {
-        if let Some(post) = &self.post {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&post).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("command {} run completed - {}", post, status);
-        } else {
-            debug!("no post command");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(name = "boss-pre", skip(self))]
-    async fn pre(&self) -> Result<()> {
-        if let Some(pre) = &self.pre {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("command {} run completed - {}", pre, status);
-        } else {
-            debug!("no command");
-        }
-        Ok(())
-    }
-
-    #[instrument(name = "boss-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
-        let key = &self.key;
-
-        let args = serde_json::to_string(&self.cfg)?;
-        debug!("args as {}", args);
-
-        db_conn.set(&key, &args).await?;
-
-        Ok(())
-    }
-
-    fn get_key(&self) -> &str {
-        return &self.key;
-    }*/
     fn get_key(&self) -> Option<&String> {
         self.key.as_ref()
     }
@@ -470,7 +254,7 @@ impl FactoryAction for KapBossConfig {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct KapCmpConfig {
-    cfg: Option<CmpMenu>,
+    cfg: Option<KCmpConfig>,
     key: Option<String>,
     post: Option<String>,
     pre: Option<String>,
@@ -478,52 +262,6 @@ struct KapCmpConfig {
 
 #[async_trait]
 impl FactoryAction for KapCmpConfig {
-    /*#[instrument(name = "cmp-post", skip(self))]
-    async fn post(&self) -> Result<()> {
-        let post = &self.post;
-        let args = serde_json::to_string(&self.cfg)?;
-        //debug!("args as {}", args);
-
-        let key = &self.key;
-        let mut child = Command::new(&post).arg(&args).arg(key).spawn()?;
-
-        let status = child.wait().await?;
-        info!("command {} run completed - {}", post, status);
-
-        Ok(())
-    }
-
-    #[instrument(name = "cmp-pre", skip(self))]
-    async fn pre(&self) -> Result<()> {
-        if let Some(pre) = &self.pre {
-            let args = serde_json::to_string(&self.cfg)?;
-            //debug!("args as {}", args);
-
-            let key = &self.key;
-            let mut child = Command::new(&pre).arg(&args).arg(key).spawn()?;
-
-            let status = child.wait().await?;
-            info!("command {} run completed - {}", pre, status);
-        } else {
-            debug!("no command");
-        }
-        Ok(())
-    }
-
-    #[instrument(name = "cmp-key-apply", skip(self, db_conn))]
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
-        let key = &self.key;
-
-        let args = serde_json::to_string(&self.cfg)?;
-        debug!("args as {}", args);
-
-        db_conn.set(&key, &args).await?;
-        Ok(())
-    }
-
-    fn get_key(&self) -> &str {
-        return &self.key;
-    }*/
     fn get_key(&self) -> Option<&String> {
         self.key.as_ref()
     }
