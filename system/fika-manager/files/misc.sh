@@ -14,5 +14,20 @@ fika_log() {
 }
 
 load_kdaemon_toml() {
-    eval "$(sed -e '/^\[/d' -e '/^#/d' -e '/^\s*$/d' -e 's,^,kdaemon_,g' -e 's, = ,=,g' $KDAEMON_TOML_PATH)"
+    local conf
+
+    conf=$KDAEMON_TOML_PATH
+    [ $# -gt 0 ] && conf=$1
+    eval "$(sed -e '/^\[/d' -e '/^#/d' -e '/^\s*$/d' -e 's,^,kdaemon_,g' -e 's, = ,=,g' $conf)"
+}
+
+update_kdaemon_toml() {
+    key=$1
+    val=$2
+
+    str="\"$val\""
+    echo $val | grep -q -E "^[0-9]+$" && str=$val
+    echo $val | grep -q -i -E "(false)|(true)" && str=$val
+
+    sed "s,^#*$key.*$,$key = $str,g" -i $KDAEMON_TOML_PATH && sync
 }

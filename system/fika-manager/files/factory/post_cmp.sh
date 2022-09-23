@@ -5,7 +5,7 @@ load_kdaemon_toml
 
 format_thingname() {
     eval "$(awk '/thing_prefix/ {print "thingPrefix="$3}' $RULE_TOML_PATH)"
-    thing="${thingPrefix}_$(echo $kdaemon_mac_address | sed 's,:,,g')"
+    thing="${thingPrefix}_$(echo $kdaemon_mac_address | awk '{gsub(":", "", $0); print tolower($0)}')"
     sed "s,^.*thing.*$,thing = \"$thing\"," -i $KDAEMON_TOML_PATH
 }
 

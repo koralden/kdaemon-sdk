@@ -2,8 +2,8 @@ use anyhow::Result;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tracing::{debug, instrument};
 
-pub mod kap_daemon;
 pub mod aws_iot;
+pub mod kap_daemon;
 pub mod recovery;
 pub use self::recovery::{recovery, RecoveryOpt};
 pub mod misc;

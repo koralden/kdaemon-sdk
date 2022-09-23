@@ -18,7 +18,7 @@ thing_prefix = "LD2"
 pull_topic = [ "name/ap-info", "name/remote-manage", "name/honest-challenge", "name/pairing", "name/captive-portal" ]
 
 [[subscribe]]
-topic = "kdaemon.easy.setup"
+topic = "kap.system.config"
 path = "/etc/fika_manager/easy_setup.sh"
 
 [[subscribe]]
@@ -80,3 +80,10 @@ start_at = {secs = 1, nanos = 0 }
 period = {secs = 180, nanos = 0 }
 path = "/etc/fika_manager/system_checking.sh"
 db_set = true
+
+#[[task]]
+#topic = "kap/fake"
+#start_at = {secs = 10, nanos = 0 }
+#period = {secs = 295, nanos = 0 }
+#path = "/etc/fika_manager/fake.sh"
+#db_publish = true

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Args;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -7,16 +8,13 @@ use tokio::process::Command;
 use tokio::signal;
 use tracing::{debug, info, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use async_trait::async_trait;
 
-use crate::kap_daemon::{KCoreConfig, KNetworkConfig, KPorConfig, KBossConfig, KCmpConfig};
+use crate::kap_daemon::{KBossConfig, KCmpConfig, KCoreConfig, KNetworkConfig, KPorConfig};
 
 type DbConnection = redis::aio::Connection;
 
 #[derive(Args, Debug, Clone)]
-#[clap(
-    about = "FIKA manager recovery with factory data"
-)]
+#[clap(about = "FIKA manager recovery with factory data")]
 pub struct RecoveryOpt {
     #[clap(
         short = 'c',
@@ -97,7 +95,8 @@ trait FactoryAction {
 
     async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
         if let Some(key) = self.get_key() {
-            if let Some(args) = self.get_cfg() { //serde_json::to_string(&self.cfg)?;
+            if let Some(args) = self.get_cfg() {
+                //serde_json::to_string(&self.cfg)?;
                 debug!("args as {}", args);
                 db_conn.set(&key, &args).await?;
             }
@@ -158,7 +157,6 @@ impl FactoryAction for KapCoreConfig {
         self.pre.as_ref()
     }
 
-
     fn get_cfg(&self) -> Option<String> {
         None
     }
@@ -186,7 +184,6 @@ impl FactoryAction for KapNetworkConfig {
     fn get_pre(&self) -> Option<&String> {
         self.pre.as_ref()
     }
-
 
     fn get_cfg(&self) -> Option<String> {
         None
@@ -216,7 +213,6 @@ impl FactoryAction for KapPorConfig {
         self.pre.as_ref()
     }
 
-
     fn get_cfg(&self) -> Option<String> {
         None
     }
@@ -244,7 +240,6 @@ impl FactoryAction for KapBossConfig {
     fn get_pre(&self) -> Option<&String> {
         self.pre.as_ref()
     }
-
 
     fn get_cfg(&self) -> Option<String> {
         None

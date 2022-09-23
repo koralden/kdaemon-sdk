@@ -7,9 +7,7 @@ use chrono::prelude::*;
 use std::path::PathBuf;
 
 #[derive(Args, Debug, Clone)]
-#[clap(
-    about = "FIKA Misc Toolset",
-)]
+#[clap(about = "FIKA Misc Toolset")]
 pub struct MiscOpt {
     #[clap(short = 's', long = "timestamp")]
     timestamp: Option<DateTime<Utc>>,

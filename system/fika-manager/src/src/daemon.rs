@@ -16,31 +16,22 @@ use std::iter::repeat_with;
 use process_stream::{Process, ProcessItem, Stream, StreamExt};
 use std::collections::{BTreeMap, HashMap};
 //use std::io;
+use crate::aws_iot::{
+    mqtt_dedicated_create, mqtt_dedicated_create_start, mqtt_dedicated_start, mqtt_provision_task,
+};
+use crate::aws_iot::{RuleAwsIotDedicatedConfig, RuleAwsIotProvisionConfig};
+use crate::kap_daemon::KdaemonConfig;
+use crate::{publish_message, set_message, DbCommand};
 use chrono::prelude::*;
 use std::path::PathBuf;
-use crate::aws_iot::{
-    mqtt_dedicated_create, mqtt_dedicated_create_start,
-    mqtt_dedicated_start, mqtt_provision_task,
-};
-use crate::aws_iot::{
-    RuleAwsIotDedicatedConfig, RuleAwsIotProvisionConfig,
-};
-use crate::{publish_message, set_message, DbCommand};
-use crate::kap_daemon::{
-    KdaemonConfig/*, KCoreConfig, KBossConfig, KCmpConfig,*/
-};
 
-#[derive(Debug,Args)]
+#[derive(Debug, Args)]
 #[clap(
     args_conflicts_with_subcommands = true,
-    about = "core daemon to interactive with platform",
+    about = "core daemon to interactive with platform"
 )]
 pub struct DaemonOpt {
-    #[clap(
-        short = 'c',
-        long = "config",
-        default_value = "/userdata/kdaemon.toml"
-    )]
+    #[clap(short = 'c', long = "config", default_value = "/userdata/kdaemon.toml")]
     config: String,
     #[clap(
         short = 'r',
@@ -360,11 +351,10 @@ async fn publish_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>
         ),
     > = HashMap::new();
     if let Ok(state) = shared.lock() {
-        let thing = state.cfg.cmp.thing.as_ref().unwrap();
         if let Some(ps) = &state.rule.task {
             for p in ps {
                 entries.insert(
-                    format!("{}/{}", thing, p.topic),
+                    format!("{}", p.topic),
                     (p.path.clone(), p.start_at, p.period, p.db_publish, p.db_set),
                 );
             }
@@ -664,12 +654,7 @@ async fn mqtt_task(
                 let cfg = &kcfg;
                 match mqtt_dedicated_create(&cfg.cmp).await {
                     Err(_) => {
-                        match mqtt_provision_task(
-                            cfg, provision,
-                            db_chan.clone(),
-                        )
-                        .await
-                        {
+                        match mqtt_provision_task(cfg, provision, db_chan.clone()).await {
                             Ok(_) => {
                                 let db_chan = db_chan.clone();
                                 if let Err(e) = mqtt_dedicated_create_start(
@@ -712,13 +697,8 @@ async fn mqtt_task(
                 match mqtt_provision_task(cfg, provision, db_chan.clone()).await {
                     Ok(_) => {
                         let db_chan = db_chan.clone();
-                        if let Err(e) = mqtt_dedicated_create_start(
-                            cfg,
-                            None,
-                            sub_conn,
-                            db_chan,
-                        )
-                        .await
+                        if let Err(e) =
+                            mqtt_dedicated_create_start(cfg, None, sub_conn, db_chan).await
                         {
                             error!(
                                 "MQTT 1nd dedicated function(from provision) not work - {:?}",

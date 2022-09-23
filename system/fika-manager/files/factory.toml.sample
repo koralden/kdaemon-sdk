@@ -8,7 +8,7 @@ database_url = "redis://127.0.0.1:6379"
 
 [network]
 post="/etc/fika_manager/factory/post_wifi_ssid_by_uci.sh"
-key = "kdaemon.easy.setup"
+key = "kap.system.config"
 [network.cfg]
 wan_type = 0
 wan_username = "change-me"

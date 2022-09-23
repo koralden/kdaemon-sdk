@@ -7,14 +7,14 @@ use tokio::fs;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::task;
 //use std::path::Path;
-use tracing::{debug, error, info, instrument, warn};
+use crate::kap_daemon::{/*KCoreConfig, */ KCmpConfig, KdaemonConfig};
+use crate::{publish_message, DbCommand};
+use aws_iot_device_sdk_rust::{async_event_loop_listener, AWSIoTAsyncClient, AWSIoTSettings};
 use chrono::prelude::*;
 use chrono::serde::ts_seconds;
-use aws_iot_device_sdk_rust::{async_event_loop_listener, AWSIoTAsyncClient, AWSIoTSettings};
-use crate::{publish_message, DbCommand};
 use rumqttc::{self, Packet, QoS};
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::kap_daemon::{/*KCoreConfig, */KCmpConfig, KdaemonConfig};
+use tracing::{debug, error, info, instrument, warn};
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
@@ -28,11 +28,7 @@ pub struct RuleAwsIotProvisionConfig {
 
 impl RuleAwsIotProvisionConfig {
     pub fn generate_thing_name(&self, extra: &str) -> Option<String> {
-        Some(format!(
-            "{}_{}",
-            &self.thing_prefix,
-            extra
-        ))
+        Some(format!("{}_{}", &self.thing_prefix, extra))
     }
 }
 
@@ -53,11 +49,7 @@ struct AwsIotKeyCertificate {
 }
 
 impl AwsIotKeyCertificate {
-    pub async fn save(
-        &self,
-        cert_path: String,
-        private_path: String,
-    ) -> Result<()> {
+    pub async fn save(&self, cert_path: String, private_path: String) -> Result<()> {
         fs::write(&cert_path, &self.certificate_pem).await?;
         fs::write(&private_path, &self.private_key).await?;
         Ok(())
@@ -83,9 +75,11 @@ pub async fn mqtt_provision_task(
 ) -> Result<()> {
     let cert_path = cfg.cmp.cert.clone();
     let private_path = cfg.cmp.private.clone();
-    let serial_number = cfg.core.serial_number.clone()
-        .to_ascii_lowercase();
-    let mac_address = cfg.core.mac_address.clone()
+    let serial_number = cfg.core.serial_number.clone().to_ascii_lowercase();
+    let mac_address = cfg
+        .core
+        .mac_address
+        .clone()
         .split(':')
         .map(|e| e.to_ascii_lowercase())
         .collect::<String>();
@@ -112,12 +106,11 @@ pub async fn mqtt_provision_task(
             .unwrap();
         let mut receiver = iot_core_client.get_receiver().await;
 
-        let recv_thread: task::JoinHandle<Result<()>> = tokio::spawn(
-            async move {
-                loop {
-                    match receiver.recv().await {
-                        Ok(event) => {
-                            match event {
+        let recv_thread: task::JoinHandle<Result<()>> = tokio::spawn(async move {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        match event {
                             Packet::Publish(p) => {
                                 match p.topic.as_str() {
                                     "$aws/certificates/create/json/accepted" => {
@@ -180,12 +173,11 @@ pub async fn mqtt_provision_task(
                             },
                             _ => debug!("Got event on receiver: {:?}", event),
                         }
-                        }
-                        Err(_) => (),
                     }
+                    Err(_) => (),
                 }
-            },
-        );
+            }
+        });
         let listen_thread: task::JoinHandle<Result<()>> = tokio::spawn(async move {
             let r = async_event_loop_listener(eventloop_stuff).await;
             if r.is_err() {
@@ -271,14 +263,14 @@ pub async fn mqtt_dedicated_start(
     iot_core_client.subscribe(&topic, QoS::AtMostOnce).await?;
     info!("aws/iot subscribed {} ok", &topic);
 
-    let topic = format!("{}/kap/aws/raw/*", thing_name);
+    let topic = format!("kap/aws/raw/*");
     sub_conn.psubscribe(&topic).await?;
     info!("ipc/db psubscribed {} ok", &topic);
-    let topic = format!("{}/kap/aws/shadow/*", thing_name);
+    let topic = format!("kap/aws/shadow/*");
     sub_conn.psubscribe(&topic).await?;
     info!("ipc/db psubscribed {} ok", &topic);
 
-    let topic = format!("{}/kap/cmp/publish/jobs/update/*", thing_name);
+    let topic = format!("kap/cmp/publish/jobs/update/*");
     sub_conn.psubscribe(&topic).await?;
     info!("ipc/db psubscribed {} ok", &topic);
 
@@ -387,7 +379,7 @@ async fn mqtt_dedicated_handle_iot(
 }
 
 enum TopicType<'a, 'b> {
-    Raw { topic: &'a str, thing: &'b str },
+    Raw { topic: &'a str },
     ShadowUpdate { topic: &'a str, thing: &'b str },
     JobsUpdate { thing: &'b str },
 }
@@ -395,8 +387,8 @@ enum TopicType<'a, 'b> {
 impl TopicType<'_, '_> {
     fn to_string<'a, 'b>(self) -> String {
         match self {
-            Self::Raw { topic, thing } => {
-                format!("$aws/things/{}/{}", thing, topic)
+            Self::Raw { topic } => {
+                format!("$aws/{}", topic)
             }
             Self::JobsUpdate { thing } => {
                 format!("$aws/things/{}/jobs/update", thing)
@@ -448,7 +440,6 @@ fn post_ipc_msg<'a>(msg: &'a redis::Msg, thing: &str) -> Result<(String, String)
             /* pure raw */
             topic = TopicType::Raw {
                 topic: &msg.get_channel_name()[ofs..],
-                thing,
             }
             .to_string();
             payload
@@ -607,10 +598,11 @@ async fn post_iot_publish_msg(
 async fn test_mac_lowercase() {
     let mac = "a1:A1:b1:B2:c1:C2".to_string();
     /*let mac = mac.chars()
-      .filter(|c| c == &':')
-      .map(|c| c.to_ascii_lowercase())
-      .collect::<String>();*/
-    let mac = mac.split(':')
+    .filter(|c| c == &':')
+    .map(|c| c.to_ascii_lowercase())
+    .collect::<String>();*/
+    let mac = mac
+        .split(':')
         .map(|e| e.to_ascii_lowercase())
         .collect::<String>();
 

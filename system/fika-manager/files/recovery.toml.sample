@@ -5,7 +5,7 @@ key = "kap.core"
 
 [network]
 post="/etc/fika_manager/factory/post_wifi_ssid_by_uci.sh"
-key = "kdaemon.easy.setup"
+key = "kap.system.config"
 
 [por]
 post="/etc/fika_manager/factory/post_por.sh"

@@ -18,6 +18,6 @@ if [ -z "${kdaemon_mac_address}" -o "${kdaemon_mac_address}" = "CHANGEME" ]; the
 fi
 
 if [ -z "${kdaemon_serial_number}" -o "${kdaemon_serial_number}" = "CHANGEME" ]; then
-    sn=$(ip link show dev eth0 | awk '/link/ {gsub(":", "", $2); print tolower($2)}')
-    sed "s,^.*serial_number.*$,serial_number = \"$sn\"," -i $KDAEMON_TOML_PATH
+    sn=$(awk '/^mac_address/ {gsub(":", "", $3); print tolower($3)}' $KDAEMON_TOML_PATH)
+    sed "s,^.*serial_number.*$,serial_number = $sn," -i $KDAEMON_TOML_PATH
 fi

@@ -7,31 +7,6 @@ load_kdaemon_toml
 
 #[ -e /dev/log ] && logger -s -t fika-manager -p debug "[$0] docdir=$docdir"
 
-deprecated_boss_owner_info() {
-    local data info code wallet
-
-    . /etc/fika_manager/hcs_honest_challenge.sh
-    db_fetch
-    data="{\"ap_wallet\":\"${kapWallet}\"}"
-    data=$(jq -rcM --null-input --arg wallet "$kapWallet" '{ "ap_wallet": $wallet }')
-
-    info=$(curl -s -H "ACCESSTOKEN:${accesstoken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -H 'Content-Type: text/plain' -X GET --data-raw $data "${rootUrl}/${apInfoPath}")
-
-    fika_log debug "[ap-info] curl -s -H \"ACCESSTOKEN:${accesstoken}\" -H \"ACCESSTOKEN-AP:${accesstokenAp}\" -H 'Content-Type: text/plain' -X GET --data-raw '$data' \"${rootUrl}/${apInfoPath}\" ==> $info"
-
-    code=$(echo $info | jq -r .code)
-    if [ "X$code" = "X200" ]; then
-        wallet=$(echo $info | jq -r .data.user_wallet)
-        redis-cli SET kap.boss.ap.info "$(echo $info | jq -rcM .data)" 2>&1 >/dev/null
-        echo $wallet
-        return 0
-    else
-        redis-cli DEL kap.boss.ap.info 2>&1 >/dev/null
-        echo "null"
-        return 127
-    fi
-}
-
 boss_owner_info() {
     local data info code wallet
 
@@ -46,7 +21,6 @@ boss_owner_info() {
     code=$(echo $info | jq -r .code)
     if [ "X$code" = "X200" ]; then
         wallet=$(echo $info | jq -r .data.user_wallet)
-        redis-cli SET kap.boss.ap.info "$(echo $info | jq -rcM .data)" 2>&1 >/dev/null
         echo $wallet
         return 0
     else
@@ -60,10 +34,7 @@ provision_main() {
     sdk=${sdk:-0.0.0}
     wallet="${kdaemon_wallet_address}"
     nickname="${kdaemon_nickname}"
-    #XXX, jq response *null* if key no nexist
-    # XXX, just disable until oss->cmp->kap ready
-    #owner="${kdaemon_user_wallet}"
-    owner="null"
+    owner="${kdaemon_user_wallet}"
     [ -z "$owner" -o "X$owner" = "Xnull" ] && owner=$(boss_owner_info)
 
     jq -rcM --null-input \
@@ -75,9 +46,18 @@ provision_main() {
 }
 
 provision_sync_aws() {
+    load_kdaemon_toml
+
+    # flow: other call ->
+    #       this(publish kap/aws/shadow/name/provision) ->
+    #       manager/aws-iot(subscribe)
     payload=$(provision_main)
-    fika_log debug "[provision-sync-aws] publish kap/aws/shadow/name/provision $payload ..."
-    echo $payload | jq -c && redis-cli PUBLISH kap/aws/shadow/name/provision "$payload"
+    eval $(awk '/^topic.*provision/ {print "provisionTopic="$3}' /etc/fika_manager/rule.toml)
+    ipcKey="$provisionTopic"
+    if [ -n "$ipcKey" ]; then
+        fika_log debug "[provision-sync-aws] publish $ipcKey $payload ..."
+        echo $payload | jq -c && redis-cli PUBLISH $ipcKey "$payload"
+    fi
 }
 
 

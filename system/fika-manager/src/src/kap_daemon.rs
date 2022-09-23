@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::{/*debug, error, info, instrument, */warn};
+use tracing::warn;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[allow(dead_code)]
@@ -78,7 +78,7 @@ impl KdaemonConfig {
 impl KCmpConfig {
     pub fn apply_thing_name(&mut self, name: Option<String>) -> Result<()> {
         if self.thing.is_none() {
-            self.thing= name;
+            self.thing = name;
         } else {
             warn!("thing-name-{:?} have forced", self.thing.as_ref());
         }
