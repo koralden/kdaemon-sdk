@@ -557,7 +557,7 @@ async fn honest_task(
 
 #[instrument(name = "mqtt::task", skip_all)]
 async fn mqtt_task(
-    aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
+    mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
     shared: Arc<Mutex<State>>,
@@ -584,7 +584,7 @@ async fn mqtt_task(
                 let cfg = &kcfg;
                 match mqtt_dedicated_create(&cfg.cmp).await {
                     Err(_) => {
-                        match mqtt_provision_task(cfg, provision, db_chan.clone()).await {
+                        match mqtt_provision_task(cfg, &provision, db_chan.clone()).await {
                             Ok(_) => {
                                 let db_chan = db_chan.clone();
                                 if let Err(e) = mqtt_dedicated_create_start(
@@ -593,40 +593,45 @@ async fn mqtt_task(
                                     aws_ipc_rx,
                                     db_chan.clone(),
                                     subscribe_ipc_tx.clone(),
-                                )
-                                .await
-                                {
-                                    error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
-                                }
+                                    )
+                                    .await
+                                    {
+                                        error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
+                                    }
                             }
                             Err(e) => {
                                 error!("MQTT provision function(from dedicated) not work - {:?}", e)
                             }
                         }
                     }
-                    Ok(iot) => {
+                    Ok(mut iot) => {
                         let thing_name = cfg.cmp.thing.as_ref().unwrap();
-                        if mqtt_dedicated_start(
-                            aws_ipc_rx,
-                            db_chan.clone(),
-                            subscribe_ipc_tx.clone(),
-                            thing_name.clone(),
-                            iot,
-                            dedicated.pull_topic,
-                        )
-                        .await
-                        .is_ok()
-                        {
-                            info!("MQTT dedicated function work Ok");
-                        } else {
-                            error!("MQTT dedicated function work fail");
+                        let mut retry = 1;
+                        loop {
+                            let ret = mqtt_dedicated_start(
+                                aws_ipc_rx,
+                                db_chan.clone(),
+                                subscribe_ipc_tx.clone(),
+                                thing_name.clone(),
+                                iot,
+                                dedicated.pull_topic.clone(),
+                                ).await;
+
+                            retry = retry + 1;
+                            if retry == 100 {
+                                break;
+                            }
+                            aws_ipc_rx = ret.unwrap();
+                            time::sleep(Duration::from_secs(retry * 30)).await;
+                            warn!("mqtt dedicated restart - {}", retry);
+                            iot = mqtt_dedicated_create(&cfg.cmp).await.unwrap();
                         }
                     }
                 }
             }
             (None, Some(provision)) => {
                 let cfg = &kcfg;
-                match mqtt_provision_task(cfg, provision, db_chan.clone()).await {
+                match mqtt_provision_task(cfg, &provision, db_chan.clone()).await {
                     Ok(_) => {
                         let db_chan = db_chan.clone();
                         if let Err(e) =

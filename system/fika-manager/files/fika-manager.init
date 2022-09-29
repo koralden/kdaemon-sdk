@@ -21,7 +21,10 @@ start() {
             /usr/bin/fika-manager recovery && redis-cli SAVE
         fi
 	printf "Starting fika-manager: "
-	start-stop-daemon -S -q -c root:root -b \
+        # network setup need fika-manager ready
+	#. /lib/functions/network.sh
+	#network_is_up wan || { echo "FAIL due to wan not ready"; exit 127 }
+        start-stop-daemon -S -q -c root:root -b \
 		-x /usr/bin/fika-manager -- daemon
 	[ $? = 0 ] && echo "OK" || echo "FAIL"
 }

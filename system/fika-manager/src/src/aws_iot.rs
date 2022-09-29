@@ -4,8 +4,9 @@ use futures_util::future;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::fs;
-use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task;
+use std::sync::Arc;
 //use std::path::Path;
 use crate::kap_daemon::{/*KCoreConfig, */ KCmpConfig, KdaemonConfig};
 use crate::DbCommand;
@@ -15,9 +16,11 @@ use chrono::serde::ts_seconds;
 use rumqttc::{self, Packet, QoS};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, instrument, warn};
+use tokio::time::{self, Duration};
+
 use crate::subscribe_task::SubscribeCmd;
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[allow(dead_code)]
 pub struct RuleAwsIotProvisionConfig {
     pub ca: String,
@@ -71,7 +74,7 @@ struct AwsIotThingResponse {
 #[instrument(name = "mqtt::provision", skip(_db_chan))]
 pub async fn mqtt_provision_task(
     cfg: &KdaemonConfig,
-    provision: RuleAwsIotProvisionConfig,
+    provision: &RuleAwsIotProvisionConfig,
     _db_chan: mpsc::Sender<DbCommand>,
 ) -> Result<()> {
     let cert_path = cfg.cmp.cert.clone();
@@ -91,8 +94,8 @@ pub async fn mqtt_provision_task(
     let aws = AWSIoTSettings::new(
         client_id,
         provision.ca.clone(),
-        provision.cert,
-        provision.private,
+        provision.cert.clone(),
+        provision.private.clone(),
         endpoint,
         None,
     );
@@ -106,6 +109,7 @@ pub async fn mqtt_provision_task(
             .await
             .unwrap();
         let mut receiver = iot_core_client.get_receiver().await;
+        let template = provision.template.clone();
 
         let recv_thread: task::JoinHandle<Result<()>> = tokio::spawn(async move {
             loop {
@@ -117,7 +121,6 @@ pub async fn mqtt_provision_task(
                                     "$aws/certificates/create/json/accepted" => {
                                         match serde_json::from_slice::<AwsIotKeyCertificate>(&p.payload) {
                                             Ok(g) => {
-                                                //debug!("got key&certificate from AWS-IOT/provision - {:?}", g);
                                                 let _ = g.save(cert_path.clone(), private_path.clone()).await;
                                                 let payload = json!({
                                                     "certificateOwnershipToken": g.certificate_ownership_token,
@@ -127,7 +130,7 @@ pub async fn mqtt_provision_task(
                                                         "DeviceLocation": sku,
                                                     }
                                                 }).to_string();
-                                                let topic = format!("$aws/provisioning-templates/{}/provision/json", provision.template);
+                                                let topic = format!("$aws/provisioning-templates/{}/provision/json", &template);
                                                 iot_core_client.publish(topic, QoS::AtLeastOnce, payload).await.unwrap();
                                             },
                                             Err(e) => {
@@ -136,7 +139,7 @@ pub async fn mqtt_provision_task(
                                         }
                                     },
                                     _ => {
-                                        let topic = format!("$aws/provisioning-templates/{}/provision/json/accepted", provision.template);
+                                        let topic = format!("$aws/provisioning-templates/{}/provision/json/accepted", &template);
                                         if topic == p.topic {
                                             let r = iot_core_client.get_client()
                                                 .await
@@ -163,8 +166,8 @@ pub async fn mqtt_provision_task(
                             Packet::SubAck(s) => {
                                 match s.pkid {
                                     1 => iot_core_client.subscribe("$aws/certificates/create/json/rejected".to_string(), QoS::AtLeastOnce).await.unwrap(),
-                                    2 => iot_core_client.subscribe(format!("$aws/provisioning-templates/{}/provision/json/accepted", &provision.template), QoS::AtLeastOnce).await.unwrap(),
-                                    3 => iot_core_client.subscribe(format!("$aws/provisioning-templates/{}/provision/json/rejected", &provision.template), QoS::AtLeastOnce).await.unwrap(),
+                                    2 => iot_core_client.subscribe(format!("$aws/provisioning-templates/{}/provision/json/accepted", &template), QoS::AtLeastOnce).await.unwrap(),
+                                    3 => iot_core_client.subscribe(format!("$aws/provisioning-templates/{}/provision/json/rejected", &template), QoS::AtLeastOnce).await.unwrap(),
                                     _ => {
                                         debug!("final subscribe response {:?}", s);
                                         iot_core_client.publish("$aws/certificates/create/json".to_string(),
@@ -255,7 +258,7 @@ pub async fn mqtt_dedicated_start(
         ),
     ),
     pull_topic: Option<Vec<String>>,
-) -> Result<()> {
+) -> Result<mpsc::Receiver<AwsIotCmd>> {
     let (iot_core_client, eventloop_stuff) = iot;
     /* topic - '#' to monitor all event */
     let topic = format!("$aws/things/{}/shadow/#", thing_name);
@@ -274,52 +277,87 @@ pub async fn mqtt_dedicated_start(
             .await;
     }
 
-    let recv1_thread = tokio::spawn(async move {
+    let notify = Arc::new(Notify::new());
+    let notify2 = notify.clone();
+
+    let recv_thread: task::JoinHandle<Result<mpsc::Receiver<AwsIotCmd>>> = tokio::spawn(async move {
         let mut receiver = iot_core_client.get_receiver().await;
         loop {
             tokio::select! {
                 msg = receiver.recv() => {
-                    _ = mqtt_dedicated_handle_iot(&db_chan, &subscribe_ipc_tx, msg).await;
+                    let r = mqtt_dedicated_handle_iot(&db_chan, &subscribe_ipc_tx, msg).await;
+                    if r.is_err() {
+                        warn!("[mqtt/aws] force leave due to receive-chan error msg");
+                        break;
+                    }
                 },
                 Some(msg) = aws_ipc_rx.recv() => {
-                    _ = mqtt_dedicated_handle_ipc(&iot_core_client, &db_chan, &thing_name, msg).await;
+                    let r = mqtt_dedicated_handle_ipc(&iot_core_client, &db_chan, &thing_name, msg).await;
+                    if r.is_err() {
+                        warn!("[mqtt/ipc] should be force leave due to AwsIotCmd::Exit(?!)");
+                        break;
+                    }
+                },
+                _ = notify2.notified() => {
+                    info!("[mqtt/internal] force thread leave due to notify received");
+                    break;
                 }
             }
         }
+        warn!("[mqtt/aws] out of receive loop");
+        Ok(aws_ipc_rx)
     });
     let listen_thread: task::JoinHandle<Result<()>> = tokio::spawn(async move {
         let r = async_event_loop_listener(eventloop_stuff).await;
-        if r.is_err() {
-            error!("dedicated thread error - {:?}", r);
-        }
+        warn!("dedicated listen thread abnormal - {:?}, force exit", r);
+        notify.notify_one();
         Ok(())
     });
-    _ = tokio::join!(recv1_thread, listen_thread);
-    Ok(())
+
+    let (recv, _listen) = tokio::join!(recv_thread, listen_thread);
+    debug!("dedicated listen/receive thread exited");
+    recv.unwrap()
 }
 
 #[instrument(name = "mqtt::dedicated", skip(aws_ipc_rx, db_chan))]
 pub async fn mqtt_dedicated_create_start(
     cfg: &KdaemonConfig,
     dedicated: Option<&RuleAwsIotDedicatedConfig>,
-    aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
+    mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
 ) -> Result<()> {
     if let Some(t) = cfg.cmp.thing.as_ref() {
-        let thing_name = t.clone();
         let pull_topic = dedicated
             .and_then(|d| d.pull_topic.clone())
             .or_else(|| None);
+        let mut retry = 1;
 
-        if let Ok(iot) = mqtt_dedicated_create(&cfg.cmp).await {
-            mqtt_dedicated_start(aws_ipc_rx, db_chan,
-                 subscribe_ipc_tx, thing_name, iot, pull_topic).await
-        } else {
-            Err(anyhow!("mqtt dedicated create fail"))
+        loop {
+            let thing_name = t.clone();
+            if let Ok(iot) = mqtt_dedicated_create(&cfg.cmp).await {
+                let ret = mqtt_dedicated_start(aws_ipc_rx,
+                     db_chan.clone(),
+                     subscribe_ipc_tx.clone(),
+                     thing_name, iot, pull_topic.clone()).await;
+                aws_ipc_rx = ret.unwrap();
+            } else {
+                error!("mqtt dedicated create fail");
+            }
+
+            time::sleep(Duration::from_secs(retry * 30)).await;
+            warn!("mqtt dedicated restart - {}", retry);
+
+            retry = retry + 1;
+            if retry == 100 {
+                break;
+            }
         }
+        error!("mqtt dedicated loop break");
+
+        Err(anyhow!("mqtt dedicated loop break"))
     } else {
-        return Err(anyhow!("mqtt dedicated create fail"));
+        Err(anyhow!("mqtt dedicated create fail"))
     }
 }
 
@@ -341,13 +379,16 @@ async fn mqtt_dedicated_handle_iot(
 
                 if topic.find("/get/rejected").is_some() {
                     warn!("[aws][kap] {} topic non-exist!", &topic);
-                    return Err(anyhow!("{} topic non-exist", &topic));
+                    //return Err(anyhow!("{} topic non-exist", &topic));
+                    return Ok(());
                 } else if topic.find("/update/rejected").is_some() {
-                    error!("[aws][kap] {} content invalid!", &topic);
-                    return Err(anyhow!("{} content invalid!", &topic));
+                    warn!("[aws][kap] {} content invalid!", &topic);
+                    //return Err(anyhow!("{} content invalid!", &topic));
+                    return Ok(());
                 } else if topic.find("/delete/rejected").is_some() {
-                    error!("[aws][kap] {} action invalid!", &topic);
-                    return Err(anyhow!("{} action invalid!", &topic));
+                    warn!("[aws][kap] {} action invalid!", &topic);
+                    //return Err(anyhow!("{} action invalid!", &topic));
+                    return Ok(());
                 }
 
                 if topic
@@ -361,11 +402,14 @@ async fn mqtt_dedicated_handle_iot(
 
                 let payload = std::str::from_utf8(&p.payload)?.to_string();
 
-                post_iot_publish_msg(db_chan, subscribe_ipc_tx, topic, payload).await?;
+                _ = post_iot_publish_msg(db_chan, subscribe_ipc_tx, topic, payload).await;
             }
             _ => debug!("[aws][kap] other event[{:?}]", event),
         },
-        Err(_) => (),
+        Err(e) => {
+            error!("[aws][kap] error event - {:?}", e);
+            return Err(anyhow!("error event {:?}", e))
+        }
     }
     Ok(())
 }
@@ -396,10 +440,6 @@ impl TopicType<'_, '_> {
 
 fn post_ipc_msg(msg: AwsIotCmd, thing: &str) -> Result<(String, String)> {
     match msg {
-        AwsIotCmd::ShadowGet { topic: _ } => {
-            error!("AwsIotCmd::ShadowGet not implement");
-            return Err(anyhow!("AwsIotCmd::ShadowGet not implement"))
-        },
         AwsIotCmd::ShadowUpdate { topic, msg } => {
             let topic = TopicType::ShadowUpdate {
                 topic: &topic,
@@ -429,6 +469,10 @@ fn post_ipc_msg(msg: AwsIotCmd, thing: &str) -> Result<(String, String)> {
             .to_string(),
             msg))
         },
+        /*AwsIotCmd::ShadowGet { topic: _ } => {
+            error!("AwsIotCmd::ShadowGet not implement");
+            return Err(anyhow!("AwsIotCmd::ShadowGet not implement"))
+        },
         AwsIotCmd::Subscribe { topic: _ } => {
             error!("AwsIotCmd::Subscribe not implement");
             return Err(anyhow!("AwsIotCmd::Subscribe not implement"))
@@ -440,6 +484,9 @@ fn post_ipc_msg(msg: AwsIotCmd, thing: &str) -> Result<(String, String)> {
         AwsIotCmd::JobUpate => {
             error!("AwsIotCmd::JobsUpdate not implement");
             return Err(anyhow!("AwsIotCmd::JobUpate not implement"))
+        },*/
+        AwsIotCmd::Exit => {
+            return Err(anyhow!("AwsIotCmd::Exit for force leave"))
         },
     }
 }
@@ -605,10 +652,6 @@ async fn test_mac_lowercase() {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum AwsIotCmd {
-    ShadowGet {
-        topic: String,
-        //resp: oneshot::Sender<Option<String>>,
-    },
     ShadowUpdate {
         topic: String,
         msg: String, //TODO Bytes
@@ -617,6 +660,10 @@ pub enum AwsIotCmd {
     RawUpdate {
         topic: String,
         msg: String, //TODO Bytes
+        //resp: oneshot::Sender<Option<String>>,
+    },
+    /*ShadowGet {
+        topic: String,
         //resp: oneshot::Sender<Option<String>>,
     },
     JobUpate,
@@ -628,7 +675,8 @@ pub enum AwsIotCmd {
     Unsubscribe {
         topic: String,
         //resp: oneshot::Sender<Option<String>>,
-    },
+    },*/
+    Exit,
 }
 
 pub async fn mqtt_ipc_register(sub: &mut redis::aio::PubSub) -> Result<()> {
@@ -655,9 +703,9 @@ pub async fn mqtt_ipc_post(
                         topic: msg.get_channel_name()[ofs..].to_string(),
                         msg: payload,
                     }
-                } else if pattern.find("kap/aws/jobs").is_some() {
+                }/* else if pattern.find("kap/aws/jobs").is_some() {
                     AwsIotCmd::JobUpate
-                } else {
+                } */else {
                     AwsIotCmd::RawUpdate {
                         topic: msg.get_channel_name()[ofs..].to_string(),
                         msg: payload,

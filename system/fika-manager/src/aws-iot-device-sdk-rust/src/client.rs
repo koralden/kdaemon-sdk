@@ -103,8 +103,8 @@ impl AWSIoTAsyncClient {
 
     /// Subscribe to a topic.
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.client.subscribe(topic, qos).await.unwrap();
-        Ok(())
+        self.client.subscribe(topic, qos).await
+        //Ok(())
     }
 
     /// Publish to topic.
@@ -113,8 +113,8 @@ impl AWSIoTAsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.client.publish(topic, qos, false, payload).await.unwrap();
-        Ok(())
+        self.client.publish(topic, qos, false, payload).await
+        //Ok(())
     }
 
     /// Get an eventloop handle that can be used to interract with the eventloop. Not needed if you
