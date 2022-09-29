@@ -6,6 +6,9 @@
 # This is changed to bash automatically by Makefile for generic Linux
 #
 
+logger -p warn "[fika][guest-net] workaround force return br-kguest until resolve firewall issue"
+printf "%s" "br-kguest" && exit 0
+
 pid=$(pgrep -f "/bin/sh /usr/lib/opennds/get_client_interface.sh")
 
 # This script requires the iw and ip packages (usually available by default)
