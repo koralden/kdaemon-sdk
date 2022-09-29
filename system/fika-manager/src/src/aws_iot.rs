@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures_util::future;
-use process_stream::StreamExt;
+//use process_stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::fs;
@@ -8,13 +8,14 @@ use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::task;
 //use std::path::Path;
 use crate::kap_daemon::{/*KCoreConfig, */ KCmpConfig, KdaemonConfig};
-use crate::{publish_message, DbCommand};
+use crate::DbCommand;
 use aws_iot_device_sdk_rust::{async_event_loop_listener, AWSIoTAsyncClient, AWSIoTSettings};
 use chrono::prelude::*;
 use chrono::serde::ts_seconds;
 use rumqttc::{self, Packet, QoS};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, instrument, warn};
+use crate::subscribe_task::SubscribeCmd;
 
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
@@ -240,10 +241,11 @@ pub async fn mqtt_dedicated_create(
         .or_else(|e| Err(anyhow!("mqtt connect fail - {e}")))
 }
 
-#[instrument(name = "mqtt::dedicated", skip(sub_conn, db_chan, iot))]
+#[instrument(name = "mqtt::dedicated", skip(aws_ipc_rx, db_chan, iot))]
 pub async fn mqtt_dedicated_start(
-    mut sub_conn: redis::aio::PubSub,
+    mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
+    subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
     thing_name: String,
     iot: (
         AWSIoTAsyncClient,
@@ -263,16 +265,19 @@ pub async fn mqtt_dedicated_start(
     iot_core_client.subscribe(&topic, QoS::AtMostOnce).await?;
     info!("aws/iot subscribed {} ok", &topic);
 
-    let topic = format!("kap/aws/raw/*");
-    sub_conn.psubscribe(&topic).await?;
-    info!("ipc/db psubscribed {} ok", &topic);
-    let topic = format!("kap/aws/shadow/*");
-    sub_conn.psubscribe(&topic).await?;
-    info!("ipc/db psubscribed {} ok", &topic);
+    //let topic = format!("kap/aws/raw/*");
+    //info!("ipc/db psubscribed {} ok", &topic);
+    //sub_conn.psubscribe(&topic).await?;
+    //db_chan.send(DbCommand::Psubscribe { key: topic }).await?;
+    //let topic = format!("kap/aws/shadow/*");
+    //info!("ipc/db psubscribed {} ok", &topic);
+    //sub_conn.psubscribe(&topic).await?;
+    //db_chan.send(DbCommand::Psubscribe { key: topic }).await?;
 
-    let topic = format!("kap/cmp/publish/jobs/update/*");
-    sub_conn.psubscribe(&topic).await?;
-    info!("ipc/db psubscribed {} ok", &topic);
+    //let topic = format!("kap/cmp/publish/jobs/update/*");
+    //info!("ipc/db psubscribed {} ok", &topic);
+    //sub_conn.psubscribe(&topic).await?;
+    //db_chan.send(DbCommand::Psubscribe { key: topic }).await?;
 
     if let Some(pull_topic) = pull_topic {
         let _: Vec<Result<(), rumqttc::ClientError>> =
@@ -285,15 +290,18 @@ pub async fn mqtt_dedicated_start(
 
     let recv1_thread = tokio::spawn(async move {
         let mut receiver = iot_core_client.get_receiver().await;
-        let mut sub_stream = sub_conn.on_message();
+        //let mut sub_stream = sub_conn.on_message();
         loop {
             tokio::select! {
                 msg = receiver.recv() => {
-                    _ = mqtt_dedicated_handle_iot(&iot_core_client, &db_chan, msg).await;
+                    _ = mqtt_dedicated_handle_iot(&db_chan, &subscribe_ipc_tx, msg).await;
                 },
-                msg = sub_stream.next() => {
+                /*msg = sub_stream.next() => {
                     _ = mqtt_dedicated_handle_ipc(&iot_core_client, &db_chan, &thing_name, msg).await;
-                },
+                },*/
+                Some(msg) = aws_ipc_rx.recv() => {
+                    _ = mqtt_dedicated_handle_ipc(&iot_core_client, &db_chan, &thing_name, msg).await;
+                }
             }
         }
     });
@@ -308,12 +316,13 @@ pub async fn mqtt_dedicated_start(
     Ok(())
 }
 
-#[instrument(name = "mqtt::dedicated", skip(sub_conn, db_chan))]
+#[instrument(name = "mqtt::dedicated", skip(aws_ipc_rx, db_chan))]
 pub async fn mqtt_dedicated_create_start(
     cfg: &KdaemonConfig,
     dedicated: Option<&RuleAwsIotDedicatedConfig>,
-    sub_conn: redis::aio::PubSub,
+    aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
+    subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
 ) -> Result<()> {
     if let Some(t) = cfg.cmp.thing.as_ref() {
         let thing_name = t.clone();
@@ -322,7 +331,8 @@ pub async fn mqtt_dedicated_create_start(
             .or_else(|| None);
 
         if let Ok(iot) = mqtt_dedicated_create(&cfg.cmp).await {
-            mqtt_dedicated_start(sub_conn, db_chan, thing_name, iot, pull_topic).await
+            mqtt_dedicated_start(aws_ipc_rx, db_chan,
+                 subscribe_ipc_tx, thing_name, iot, pull_topic).await
         } else {
             Err(anyhow!("mqtt dedicated create fail"))
         }
@@ -332,8 +342,8 @@ pub async fn mqtt_dedicated_create_start(
 }
 
 async fn mqtt_dedicated_handle_iot(
-    _iot: &AWSIoTAsyncClient,
     db_chan: &mpsc::Sender<DbCommand>,
+    subscribe_ipc_tx: &mpsc::Sender<SubscribeCmd>,
     msg: Result<Packet, tokio::sync::broadcast::error::RecvError>,
 ) -> Result<()> {
     match msg {
@@ -369,7 +379,7 @@ async fn mqtt_dedicated_handle_iot(
 
                 let payload = std::str::from_utf8(&p.payload)?.to_string();
 
-                post_iot_publish_msg(db_chan, topic, payload).await?;
+                post_iot_publish_msg(db_chan, subscribe_ipc_tx, topic, payload).await?;
             }
             _ => debug!("[aws][kap] other event[{:?}]", event),
         },
@@ -402,54 +412,54 @@ impl TopicType<'_, '_> {
     }
 }
 
-fn post_ipc_msg<'a>(msg: &'a redis::Msg, thing: &str) -> Result<(String, String)> {
-    let payload: String = msg.get_payload()?;
-    if let Ok(pattern) = msg.get_pattern::<String>() {
-        let topic: String;
-        let ofs: usize = pattern.len() - 1;
-
-        let payload = if pattern.find("kap/aws/shadow").is_some() {
-            topic = TopicType::ShadowUpdate {
-                topic: &msg.get_channel_name()[ofs..],
+fn post_ipc_msg(msg: AwsIotCmd, thing: &str) -> Result<(String, String)> {
+    match msg {
+        AwsIotCmd::ShadowGet { topic: _ } => {
+            error!("AwsIotCmd::ShadowGet not implement");
+            return Err(anyhow!("AwsIotCmd::ShadowGet not implement"))
+        },
+        AwsIotCmd::ShadowUpdate { topic, msg } => {
+            let topic = TopicType::ShadowUpdate {
+                topic: &topic,
                 thing,
-            }
-            .to_string();
+            }.to_string();
 
-            let reported = serde_json::from_str::<serde_json::Value>(&payload[..])?;
+            let reported = serde_json::from_str::<serde_json::Value>(&msg[..])?;
             let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
             let client_token = format!("{}.{}", timestamp.as_secs(), timestamp.subsec_millis());
 
             debug!(
                 "ipc timestamp[{}] payload[{:?}] to {:?}",
-                client_token, &payload, reported
+                client_token, &msg, reported
             );
 
-            json!({
+            Ok((topic, json!({
                 "state": {
                     "reported": reported
                 },
                 "clientToken": client_token
             })
-            .to_string()
-        } else if pattern.find("kap/aws/jobs").is_some() {
-            /* TODO */
-            warn!("ipc jobs/update not implement");
-            topic = TopicType::JobsUpdate { thing }.to_string();
-            payload
-        } else {
-            /* pure raw */
-            topic = TopicType::Raw {
-                topic: &msg.get_channel_name()[ofs..],
+            .to_string()))
+        },
+        AwsIotCmd::RawUpdate { topic, msg } => {
+            Ok((TopicType::Raw {
+                topic: &topic,
             }
-            .to_string();
-            payload
-        };
-
-        Ok((topic, payload))
-    } else {
-        /* not psubscribe? */
-        let topic = msg.get_channel_name().to_string();
-        Ok((topic, payload))
+            .to_string(),
+            msg))
+        },
+        AwsIotCmd::Subscribe { topic: _ } => {
+            error!("AwsIotCmd::Subscribe not implement");
+            return Err(anyhow!("AwsIotCmd::Subscribe not implement"))
+        },
+        AwsIotCmd::Unsubscribe { topic: _ } => {
+            error!("AwsIotCmd::Unsubscribe not implement");
+            return Err(anyhow!("AwsIotCmd::Unsubscribe not implement"))
+        },
+        AwsIotCmd::JobUpate => {
+            error!("AwsIotCmd::JobsUpdate not implement");
+            return Err(anyhow!("AwsIotCmd::JobUpate not implement"))
+        },
     }
 }
 
@@ -457,34 +467,17 @@ async fn mqtt_dedicated_handle_ipc(
     iot: &AWSIoTAsyncClient,
     _db_chan: &mpsc::Sender<DbCommand>,
     thing: &str,
-    msg: Option<redis::Msg>,
+    msg: AwsIotCmd,
 ) -> Result<()> {
-    debug!("ipc get msg - {:?}", msg);
+    let (topic, payload) = post_ipc_msg(msg, thing)?;
 
-    match msg {
-        Some(m) => {
-            let (topic, payload) = post_ipc_msg(&m, thing)?;
-
-            match iot.publish(&topic, QoS::AtMostOnce, payload).await {
-                Ok(_) => {
-                    info!("[kap][aws] send {:?} to", &topic);
-                    /*let now = Instant::now();
-                    db_chan
-                        .send(DbCommand::Rpush {
-                            key: format!("history/to/{}", &topic),
-                            val: format!("{:?}", now),
-                            limit: 100,
-                        })
-                        .await?;*/
-                }
-                Err(e) => {
-                    error!("[kap][aws] send/publish fail - {:?}", e);
-                    return Err(anyhow!("iot publish fail - {:?}", e));
-                }
-            }
+    match iot.publish(&topic, QoS::AtMostOnce, payload).await {
+        Ok(_) => {
+            info!("[kap][aws] send {:?} to", &topic);
         }
-        None => {
-            warn!("ipc other message??");
+        Err(e) => {
+            error!("[kap][aws] send/publish fail - {:?}", e);
+            return Err(anyhow!("iot publish fail - {:?}", e));
         }
     }
 
@@ -521,7 +514,7 @@ async fn shadow_version_compare(
     db_chan: &mpsc::Sender<DbCommand>,
     topic: &str,
     version: u16,
-) -> Result<()> {
+) -> Result<bool> {
     let (db_req, db_resp) = oneshot::channel();
     db_chan
         .send(DbCommand::Get {
@@ -540,15 +533,16 @@ async fn shadow_version_compare(
                     "[db] shadow content not changed ({} vs {})",
                     o.version, version
                 );
-                return Err(anyhow!("not need upgrade"));
+                return Ok(false);
             }
         }
     }
-    return Ok(());
+    return Ok(true);
 }
 
 async fn post_iot_publish_msg(
     db_chan: &mpsc::Sender<DbCommand>,
+    subscribe_ipc_tx: &mpsc::Sender<SubscribeCmd>,
     topic: String,
     payload: String,
 ) -> Result<()> {
@@ -560,11 +554,29 @@ async fn post_iot_publish_msg(
         .take(3)
         .fold(String::from("aws/kap"), |sum, i| sum + "/" + i);
     if shadow.state.desired.is_some() {
-        shadow_version_compare(db_chan, &sub_topic, shadow.version).await?;
+        match shadow_version_compare(db_chan,&sub_topic, shadow.version).await {
+            Ok(update) => {
+                if update {
+                    let p = serde_json::to_string(&shadow.state.desired.unwrap())?;
+                    let t = format!("{}/{}", &sub_topic, "state");
 
-        let p = serde_json::to_string(&shadow.state.desired.unwrap())?;
-        let t = format!("{}/{}", &sub_topic, "state");
-        publish_message(db_chan, t, p).await?;
+                    subscribe_ipc_tx.send(SubscribeCmd::Notify {
+                        topic: t,
+                        msg: p,
+                    }).await?;
+                }
+            },
+            Err(e) => {
+                error!("shadow version compare error - {:?}", e);
+                warn!("force sync to sub-task");
+                let p = serde_json::to_string(&shadow.state.desired.unwrap())?;
+                let t = format!("{}/{}", &sub_topic, "state");
+                subscribe_ipc_tx.send(SubscribeCmd::Notify {
+                    topic: t,
+                    msg: p,
+                }).await?;
+            }
+        }
     }
 
     let (resp_tx, resp_rx) = oneshot::channel();
@@ -607,4 +619,80 @@ async fn test_mac_lowercase() {
         .collect::<String>();
 
     assert_eq!(mac, "a1a1b1b2c1b2");
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum AwsIotCmd {
+    ShadowGet {
+        topic: String,
+        //resp: oneshot::Sender<Option<String>>,
+    },
+    ShadowUpdate {
+        topic: String,
+        msg: String, //TODO Bytes
+        //resp: oneshot::Sender<Option<String>>,
+    },
+    RawUpdate {
+        topic: String,
+        msg: String, //TODO Bytes
+        //resp: oneshot::Sender<Option<String>>,
+    },
+    JobUpate,
+    Subscribe {
+        topic: String,
+        //resp: oneshot::Sender<Option<usize>>,
+        //resp: mpsc::Sender<Option<String>>,
+    },
+    Unsubscribe {
+        topic: String,
+        //resp: oneshot::Sender<Option<String>>,
+    },
+}
+
+pub async fn mqtt_ipc_register(sub: &mut redis::aio::PubSub) -> Result<()> {
+    sub.psubscribe("kap/aws/raw/*".to_string()).await?;
+    sub.psubscribe("kap/aws/shadow/*".to_string()).await?;
+
+    Ok(())
+}
+
+pub async fn mqtt_ipc_post(
+    aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
+    msg: Option<redis::Msg>,
+) -> Result<()> {
+    match msg {
+        Some(msg) => {
+            let payload: String = msg.get_payload()?;
+            if let Ok(pattern) = msg.get_pattern::<String>() {
+                let ofs: usize = pattern.len() - 1;
+
+                let cmd = if pattern.find("kap/aws/shadow").is_some() {
+                    debug!("got kap/aws/shadow msg - {:?}", &msg);
+
+                    AwsIotCmd::ShadowUpdate {
+                        topic: msg.get_channel_name()[ofs..].to_string(),
+                        msg: payload,
+                    }
+                } else if pattern.find("kap/aws/jobs").is_some() {
+                    AwsIotCmd::JobUpate
+                } else {
+                    AwsIotCmd::RawUpdate {
+                        topic: msg.get_channel_name()[ofs..].to_string(),
+                        msg: payload,
+                    }
+                };
+
+                aws_ipc_tx.send(cmd).await?;
+            } else {
+                /* not psubscribe? */
+                warn!("ipc non-psubscribe - {:?}?", msg);
+            }
+        }
+        None => {
+            warn!("ipc other message??");
+        }
+    }
+
+    Ok(())
 }

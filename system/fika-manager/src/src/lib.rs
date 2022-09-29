@@ -10,6 +10,8 @@ pub mod misc;
 pub use self::misc::{misc, MiscOpt};
 pub mod daemon;
 pub use self::daemon::{daemon, DaemonOpt};
+pub mod subscribe_task;
+pub mod publish_task;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -39,6 +41,19 @@ pub enum DbCommand {
         val: String,
         limit: usize,
     },
+    /*AwsShadowPublish {
+        key: String,
+        val: String,
+    },
+    SubTaskNotify {
+        topic: String,
+        payload: String,
+    },
+    NotifySubscribe {
+        key: String,
+    },
+    NotifySubscribeDone,*/
+    Exit,
 }
 
 #[instrument(skip(chan_tx))]
