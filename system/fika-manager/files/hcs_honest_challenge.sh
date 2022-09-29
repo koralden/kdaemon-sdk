@@ -33,10 +33,8 @@ db_fetch() {
     [ -z "$apInfoPath" -o "$apInfoPath" = "null" ] && apInfoPath="v0/ap/info"
 
     if [ -z "$rootUrl" -o -z "$accessToken" -o -z "$accesstokenAp" -o -z "$kapWallet" ]; then
-        fika_log error "database rootUrl/accessToken/accesstokenAp/kapWallet=${rootUrl}/${accessToken}/${accesstokenAp}/${kapWallet} invalid"
+        fika_log error "[hcs] boss config - ${rootUrl}/${accessToken}/${accesstokenAp}/${kapWallet} invalid"
         exit 127
-    else
-        fika_log debug "appUrl: $rootUrl kapWallet: $kapWallet accessToken: $accessToken accesstokenAp: $accesstokenAp"
     fi
 
     true
@@ -55,14 +53,17 @@ report_boss_hcs_json() {
         '{ "app_wallet": $wallet, "hashed": $hashed}')
 
     response=$(curl -s -H "ACCESSTOKEN:${accessToken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -X POST -d $json "${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet}")
+    fika_log debug "[hcs] curl -H \"ACCESSTOKEN:${accessToken}\" -H \"ACCESSTOKEN-AP:${accesstokenAp}\" -d $json ${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet} => ${response}"
+
     code=$(echo $response | jq -r .code)
     if [ "X$code" = "X200" ]; then
         changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
         redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
-        fika_log debug "redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} ${changed}"
+
+        fika_log debug "[hcs] redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${changed}"
         true
     else
-        fika_log error "POST $json ${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet} fail"
+        fika_log error "[hcs] POST $json ${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet} fail"
         false
     fi
 }
@@ -79,14 +80,16 @@ report_boss_hcs() {
     raw="hcs_token=${tid}&ap_wallet=${kapWallet}&hash=${hashed}"
 
     response=$(curl -s -H "ACCESSTOKEN:${accessToken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -H 'Content-Type: text/plain' -X POST --data-raw $raw "${rootUrl}/${apHcsPath}")
+    fika_log debug "[hcs] curl -H \"ACCESSTOKEN:${accessToken}\" -H \"ACCESSTOKEN-AP:${accesstokenAp}\" -H 'Content-Type: text/plain' --data-raw $raw ${rootUrl}/${apHcsPath} => ${response}"
+
     code=$(echo $response | jq -r .code)
     if [ "X$code" = "X200" ]; then
         changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
         redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
-        fika_log debug "redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} ${changed}"
+        fika_log debug "[hcs] redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} ${changed}"
         true
     else
-        fika_log error "POST $raw ${rootUrl}/${apHcsPath} fail"
+        fika_log error "[hcs] POST $raw ${rootUrl}/${apHcsPath} fail"
         false
     fi
 }
@@ -101,12 +104,12 @@ post_main() {
 
     tid=$(redis-cli LINDEX ${KEY_BOSS_HCS_LIST} 0 | jq -r .hcs_token)
     [ -z "${tid}" -o "Xnull" = "X${tid}" ] \
-        && fika_log error "not task for ${cid}" \
+        && fika_log error "[hcs] not task for ${cid}" \
         && exit 127
 
     challenger=$(redis-cli --raw HGET "${KEY_BOSS_HCS_CHALLENGERS}.${tid}" "${cid}")
     if [ -z "$challenger" ]; then
-        fika_log debug "No any challengers in this task-${tid}"
+        fika_log debug "[hcs] No any challengers in this task-${tid}"
         exit 0
     fi
 
