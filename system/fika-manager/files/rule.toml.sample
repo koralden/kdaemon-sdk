@@ -50,16 +50,16 @@ topic = "boss.honest.challenger"
 path = "/etc/fika_manager/hcs_honest_challenge.sh"
 
 [[task]]
-topic = "kap/aws/shadow/name/provision"
+topic = "name/provision"
 start_at = {secs = 3, nanos = 0 }
 path = "/etc/fika_manager/provision.sh"
-db_publish = true
+aws_publish = true
 
 [[task]]
-topic = "kap/aws/shadow/name/heartbeat"
+topic = "name/heartbeat"
 period = {secs = 295, nanos = 0 }
 path = "/etc/fika_manager/heartbeat.sh"
-db_publish = true
+aws_publish = true
 
 #[[task]]
 #topic = "kap/aws/shadow/name/runtime-statistics"

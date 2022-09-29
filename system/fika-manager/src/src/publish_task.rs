@@ -6,8 +6,22 @@ use std::path::PathBuf;
 use tokio::time::{self, Duration, Instant};
 use process_stream::{Process, ProcessItem, Stream, StreamExt};
 use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
 
 use crate::{publish_message, set_message, DbCommand};
+use crate::aws_iot::AwsIotCmd;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[allow(dead_code)]
+pub struct RuleConfigTask {
+    pub topic: String,
+    pub path: PathBuf,
+    pub start_at: Option<Duration>,
+    pub period: Option<Duration>,
+    pub db_publish: Option<bool>,
+    pub db_set: Option<bool>,
+    pub aws_publish: Option<bool>,
+}
 
 #[instrument(skip(process_stream))]
 pub async fn capture_process_stream(
@@ -52,6 +66,8 @@ pub fn spawn_task_run_path_publish(
     timeout: Option<Duration>,
     db_publish: Option<bool>,
     db_set: Option<bool>,
+    aws_publish: Option<bool>,
+    aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
 ) -> Result<tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
     info!(
         "spawn task run {:?} with topic {:?}/{:?}",
@@ -73,7 +89,13 @@ pub fn spawn_task_run_path_publish(
                                     publish_message(&chan_tx, topic.clone(), payload.clone()).await?;
                                 }
                                 if db_set.is_some() {
-                                    set_message(chan_tx, topic, payload).await?;
+                                    set_message(chan_tx, topic.clone(), payload.clone()).await?;
+                                }
+                                if aws_publish.is_some() {
+                                    aws_ipc_tx.send(AwsIotCmd::ShadowUpdate {
+                                        topic: topic.clone(),
+                                        msg: payload.clone(),
+                                    }).await?;
                                 }
                             },
                             Err(e) => {
@@ -129,21 +151,24 @@ fn next_topics(expirations: Arc<Mutex<ExpirationT>>) -> Option<(Instant, String)
     None
 }
 
+#[instrument(name = "publish::main", skip(chan_tx, aws_ipc_tx, entries))]
 pub async fn publish_main(
     chan_tx: mpsc::Sender<DbCommand>,
-    entries: HashMap<String, (
-            PathBuf,
-            Option<Duration>,
-            Option<Duration>,
-            Option<bool>,
-            Option<bool>,
-        )>,
+    aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
+    entries: HashMap<String, RuleConfigTask>,
 ) -> Result<()> {
     let mut expirations: ExpirationT = BTreeMap::new();
     let now = Instant::now();
     let mut id = 1;
 
-    for (topic, (path, start_at, period, db_publish, db_set)) in &entries {
+    for (_topic, task) in &entries {
+        let RuleConfigTask {
+            topic, path,
+            start_at, period,
+            db_publish, db_set,
+            aws_publish,
+        } = task;
+
         match *start_at {
             Some(start) => {
                 let when = now + start;
@@ -177,8 +202,8 @@ pub async fn publish_main(
                         topic.to_string(),
                         path.to_path_buf(),
                         timeout,
-                        *db_publish,
-                        *db_set,
+                        *db_publish, *db_set,
+                        *aws_publish, aws_ipc_tx.clone(),
                     );
                 }
             }
@@ -190,13 +215,21 @@ pub async fn publish_main(
         while let Some((when, topic)) = next_topics(expirations_cloned.clone()) {
             tokio::select! {
                 _ = time::sleep_until(when) => {
-                    if let Some((path, _, period, db_publish, db_set)) =entries.get(&topic) {
+                    if let Some(task) =entries.get(&topic) {
+                        let RuleConfigTask {
+                            topic, path,
+                            start_at: _, period,
+                            db_publish, db_set,
+                            aws_publish,
+                        } = task;
+
                         _ = spawn_task_run_path_publish(
                             chan_tx.clone(),
                             topic.to_string(),
                             path.to_path_buf(),
                             *period,
-                            *db_publish, *db_set);
+                            *db_publish, *db_set,
+                            *aws_publish, aws_ipc_tx.clone());
                     }
                 }
             }

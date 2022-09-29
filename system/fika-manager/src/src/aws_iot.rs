@@ -241,7 +241,7 @@ pub async fn mqtt_dedicated_create(
         .or_else(|e| Err(anyhow!("mqtt connect fail - {e}")))
 }
 
-#[instrument(name = "mqtt::dedicated", skip(aws_ipc_rx, db_chan, iot))]
+#[instrument(name = "mqtt::dedicated", skip_all)]
 pub async fn mqtt_dedicated_start(
     mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
@@ -265,20 +265,6 @@ pub async fn mqtt_dedicated_start(
     iot_core_client.subscribe(&topic, QoS::AtMostOnce).await?;
     info!("aws/iot subscribed {} ok", &topic);
 
-    //let topic = format!("kap/aws/raw/*");
-    //info!("ipc/db psubscribed {} ok", &topic);
-    //sub_conn.psubscribe(&topic).await?;
-    //db_chan.send(DbCommand::Psubscribe { key: topic }).await?;
-    //let topic = format!("kap/aws/shadow/*");
-    //info!("ipc/db psubscribed {} ok", &topic);
-    //sub_conn.psubscribe(&topic).await?;
-    //db_chan.send(DbCommand::Psubscribe { key: topic }).await?;
-
-    //let topic = format!("kap/cmp/publish/jobs/update/*");
-    //info!("ipc/db psubscribed {} ok", &topic);
-    //sub_conn.psubscribe(&topic).await?;
-    //db_chan.send(DbCommand::Psubscribe { key: topic }).await?;
-
     if let Some(pull_topic) = pull_topic {
         let _: Vec<Result<(), rumqttc::ClientError>> =
             future::join_all(pull_topic.iter().map(|t| async {
@@ -290,15 +276,11 @@ pub async fn mqtt_dedicated_start(
 
     let recv1_thread = tokio::spawn(async move {
         let mut receiver = iot_core_client.get_receiver().await;
-        //let mut sub_stream = sub_conn.on_message();
         loop {
             tokio::select! {
                 msg = receiver.recv() => {
                     _ = mqtt_dedicated_handle_iot(&db_chan, &subscribe_ipc_tx, msg).await;
                 },
-                /*msg = sub_stream.next() => {
-                    _ = mqtt_dedicated_handle_ipc(&iot_core_client, &db_chan, &thing_name, msg).await;
-                },*/
                 Some(msg) = aws_ipc_rx.recv() => {
                     _ = mqtt_dedicated_handle_ipc(&iot_core_client, &db_chan, &thing_name, msg).await;
                 }
@@ -391,7 +373,7 @@ async fn mqtt_dedicated_handle_iot(
 enum TopicType<'a, 'b> {
     Raw { topic: &'a str },
     ShadowUpdate { topic: &'a str, thing: &'b str },
-    JobsUpdate { thing: &'b str },
+    //JobsUpdate { thing: &'b str },
 }
 
 impl TopicType<'_, '_> {
@@ -400,9 +382,9 @@ impl TopicType<'_, '_> {
             Self::Raw { topic } => {
                 format!("$aws/{}", topic)
             }
-            Self::JobsUpdate { thing } => {
+            /*Self::JobsUpdate { thing } => {
                 format!("$aws/things/{}/jobs/update", thing)
-            }
+            }*/
             TopicType::ShadowUpdate { topic, thing } => {
                 /* name/{SHADOW} for names shadow
                  * {SHADOW} for classic shadow */
@@ -428,8 +410,7 @@ fn post_ipc_msg(msg: AwsIotCmd, thing: &str) -> Result<(String, String)> {
             let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
             let client_token = format!("{}.{}", timestamp.as_secs(), timestamp.subsec_millis());
 
-            debug!(
-                "ipc timestamp[{}] payload[{:?}] to {:?}",
+            debug!("ipc client-token[{}] payload[{:?}] to {:?}",
                 client_token, &msg, reported
             );
 

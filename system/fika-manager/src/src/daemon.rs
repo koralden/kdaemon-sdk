@@ -32,6 +32,7 @@ use crate::subscribe_task::{
     SubscribeCmd, subscribe_ipc_register,
     subscribe_ipc_post, subscribe_main};
 use crate::publish_task::{
+    RuleConfigTask,
     publish_main, spawn_task_run_path_publish
 };
 
@@ -83,17 +84,6 @@ struct RuleConfigSubscribe {
     path: PathBuf,
 }
 
-#[derive(Deserialize, Debug, Serialize, Clone)]
-#[allow(dead_code)]
-struct RuleConfigTask {
-    topic: String,
-    path: PathBuf,
-    start_at: Option<Duration>,
-    period: Option<Duration>,
-    db_publish: Option<bool>,
-    db_set: Option<bool>,
-}
-
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 struct RuleHonestConfig {
@@ -119,7 +109,7 @@ struct State {
     rule: RuleConfig,
 }
 
-async fn conn_rpc_init(
+async fn _conn_rpc_init(
     url: String,
     shared: Arc<Mutex<State>>,
 ) -> (Option<redis::Client>, Option<redis::aio::PubSub>, Option<redis::aio::PubSub>) {
@@ -160,28 +150,49 @@ async fn conn_access_task(
     aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
 ) -> Result<()> {
-    let cacher = redis::Client::open(url)?;
-    let mut conn = cacher.get_async_connection().await?;
-    let mut aws_conn = cacher
-        .get_async_connection()
-        .await?
-        .into_pubsub();
+    let cacher = redis::Client::open(url);
+    if let Err(e) = cacher {
+        error!("[rpc-core] redis client open fail - {:?}", &e);
+        return Err(anyhow!("[rpc-core] client open {:?}", e));
+    }
 
-    mqtt_ipc_register(&mut aws_conn).await?;
+    let cacher = cacher.unwrap();
+    let conn = cacher.get_async_connection().await;
+    if let Err(e) = conn {
+        error!("[rpc-core] redis async connection fail - {:?}", &e);
+        return Err(anyhow!("[rpc-core] async connection {:?}", e));
+    }
+
+    let mut conn = conn.unwrap();
+    let aws_conn = cacher
+        .get_async_connection()
+        .await;
+    if let Err(e) = aws_conn {
+        error!("[rpc-core] aws redis async connection fail - {:?}", &e);
+        return Err(anyhow!("[rpc-core] aws async connection {:?}", e));
+    }
+    let mut aws_conn = aws_conn.unwrap().into_pubsub();
+
+    if let Err(e) = mqtt_ipc_register(&mut aws_conn).await {
+        error!("[rpc-core] mqtt/ipc register fail - {:?}", &e);
+        return Err(anyhow!("[rpc-core] mqtt/ipc register fail {:?}", e));
+    }
     let mut aws_stream = aws_conn.on_message();
 
-    let mut subscribe_conn = cacher
+    let subscribe_conn = cacher
         .get_async_connection()
-        .await?
-        .into_pubsub();
-    wrap_subscribe_ipc_register(shared, &mut subscribe_conn).await?;
+        .await;
+    if let Err(e) = subscribe_conn {
+        error!("[rpc-core] subscribe redis async connection fail - {:?}", &e);
+        return Err(anyhow!("[rpc-core] subscribe async connection {:?}", e));
+    }
+    let mut subscribe_conn = subscribe_conn.unwrap().into_pubsub();
+
+    if let Err(e) = wrap_subscribe_ipc_register(shared, &mut subscribe_conn).await {
+        error!("[rpc-core] subscribe/ipc register fail - {:?}", &e);
+        return Err(anyhow!("[rpc-core] subscribe/ipc register fail {:?}", e));
+    }
     let mut subscribe_stream = subscribe_conn.on_message();
-    /*let (cacher, aws_conn, subscribe_conn) = conn_rpc_init(url, shared).await;
-    let conn = if let Some(cacher) = cacher {
-        cacher.get_async_connection().await.ok()
-    } else {
-        None
-    };*/
 
     loop {
         tokio::select! {
@@ -189,53 +200,33 @@ async fn conn_access_task(
                 if let Some(cmd) = cmd {
                     match cmd {
                         DbCommand::Get { key, resp } => {
-                            //if let Some(ref conn) = conn {
-                                let value: Option<String> = conn.get(key).await.ok();
-                                //info!("[conn_access_task]: todo {}", value);
-                                let _ = resp.send(value);
-                            /*} else {
-                                warn!("conn/redis not ready for GET");
-                            }*/
+                            let value: Option<String> = conn.get(key).await.ok();
+                            //info!("[conn_access_task]: todo {}", value);
+                            let _ = resp.send(value);
                         }
                         DbCommand::Set { key, val, resp } => {
-                            //if let Some(ref conn) = conn {
-                                let ret: Option<String> = conn.set(key, val).await.ok();
-                                //debug!("[conn_access_task]: todo {}", ret);
-                                let _ = resp.send(ret);
-                            /*} else {
-                                warn!("conn/redis not ready for SET");
-                            }*/
+                            let ret: Option<String> = conn.set(key, val).await.ok();
+                            //debug!("[conn_access_task]: todo {}", ret);
+                            let _ = resp.send(ret);
                         }
                         DbCommand::Publish { key, val, resp } => {
-                            //if let Some(ref conn) = conn {
-                                let ret: Option<usize> = conn.publish(key, val).await.ok();
-                                //debug!("[conn_access_task]: todo {}", ret);
-                                let _ = resp.send(ret);
-                            /*} else {
-                                warn!("conn/redis not ready for PUBLISH");
-                            }*/
+                            let ret: Option<usize> = conn.publish(key, val).await.ok();
+                            //debug!("[conn_access_task]: todo {}", ret);
+                            let _ = resp.send(ret);
                         }
                         DbCommand::Lindex { key, idx, resp } => {
-                            //if let Some(ref conn) = conn {
-                                let value: Option<String> = conn.lindex(key, idx).await.ok();
-                                //info!("[conn_access_task]: todo {}", value);
-                                let _ = resp.send(value);
-                            /*} else {
-                                warn!("conn/redis not ready for LINDEX");
-                            }*/
+                            let value: Option<String> = conn.lindex(key, idx).await.ok();
+                            //info!("[conn_access_task]: todo {}", value);
+                            let _ = resp.send(value);
                         }
                         DbCommand::Rpush { key, val, limit } => {
-                            //if let Some(ref conn) = conn {
-                                if let Ok(len) = conn.rpush::<&str, String, usize>(&key, val).await {
-                                    if len == limit {
-                                        if let Err(e) = conn.lpop::<&str, String>(&key, None).await {
-                                            return Err(anyhow!("DB RPUSH/LPOP fail - {:?}", e));
-                                        }
+                            if let Ok(len) = conn.rpush::<&str, String, usize>(&key, val).await {
+                                if len == limit {
+                                    if let Err(e) = conn.lpop::<&str, String>(&key, None).await {
+                                        return Err(anyhow!("DB RPUSH/LPOP fail - {:?}", e));
                                     }
                                 }
-                            /*} else {
-                                warn!("conn/redis not ready for RPUSH");
-                            }*/
+                            }
                         }
                         /*DbCommand::AwsShadowPublish { key, val } => {
                             let r = aws_ipc_tx.clone().send(AwsIotCmd::ShadowUpdate {
@@ -334,34 +325,23 @@ async fn subscribe_task(
 #[instrument(
     //level = "info",
     name = "publish::task",
-    skip(chan_tx, shared),
+    skip_all,
 )]
 async fn publish_task(
     chan_tx: mpsc::Sender<DbCommand>,
+    aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
     shared: Arc<Mutex<State>>
 ) -> Result<()> {
-    let mut entries: HashMap<
-        String,
-        (
-            PathBuf,
-            Option<Duration>,
-            Option<Duration>,
-            Option<bool>,
-            Option<bool>,
-        ),
-    > = HashMap::new();
+    let mut entries: HashMap<String, RuleConfigTask> = HashMap::new();
     if let Ok(state) = shared.lock() {
         if let Some(ps) = &state.rule.task {
             for p in ps {
-                entries.insert(
-                    format!("{}", p.topic),
-                    (p.path.clone(), p.start_at, p.period, p.db_publish, p.db_set),
-                );
+                entries.insert(p.topic.clone(), p.clone());
             }
         }
     }
 
-    publish_main(chan_tx, entries).await
+    publish_main(chan_tx, aws_ipc_tx, entries).await
 }
 
 #[allow(dead_code)]
@@ -444,7 +424,6 @@ pub async fn daemon(opt: DaemonOpt) -> Result<(), MyError> {
     let (subscribe_tx, subscribe_rx) = mpsc::channel::<SubscribeCmd>(32);
 
     let url = cfg.core.database.clone();
-    //let cache = redis::Client::open(url)?;
     let shared = Arc::new(Mutex::new(State {
         cfg,
         rule,
@@ -464,8 +443,14 @@ pub async fn daemon(opt: DaemonOpt) -> Result<(), MyError> {
         chan_tx.clone(),
         shared.clone(),
     ));
-    let _pub_task = tokio::spawn(publish_task(chan_tx.clone(), shared.clone()));
-    let _cron_task = tokio::spawn(honest_task(chan_tx.clone(), shared.clone()));
+    let _pub_task = tokio::spawn(publish_task(
+            chan_tx.clone(),
+            aws_ipc_tx.clone(),
+            shared.clone()));
+    let _cron_task = tokio::spawn(honest_task(
+            chan_tx.clone(),
+            aws_ipc_tx.clone(),
+            shared.clone()));
     let _mqtt_task = tokio::spawn(mqtt_task(
         aws_ipc_rx,
         chan_tx.clone(),
@@ -496,9 +481,13 @@ struct BossHcsPair {
 #[instrument(
     //level = "info",
     name = "honest::task",
-    skip(chan_tx, shared),
+    skip_all,
 )]
-async fn honest_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>) {
+async fn honest_task(
+    chan_tx: mpsc::Sender<DbCommand>,
+    aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
+    shared: Arc<Mutex<State>>)
+{
     let key_hcs_list = "boss.hcs.token.list";
     let mut fail_cycle = Duration::from_secs(10);
     let mut ok_cycle = Duration::from_secs(10);
@@ -528,7 +517,8 @@ async fn honest_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>
                     "boss.token".to_string(),
                     cmd_path.clone(),
                     Some(Duration::from_secs(10)),
-                    None, None) {
+                    None, None,
+                    None, aws_ipc_tx.clone()) {
 
                     if !job.is_finished() {
                         _ = job.await;
@@ -565,7 +555,7 @@ async fn honest_task(chan_tx: mpsc::Sender<DbCommand>, shared: Arc<Mutex<State>>
     }
 }
 
-#[instrument(name = "mqtt::task", skip(aws_ipc_rx, db_chan, shared))]
+#[instrument(name = "mqtt::task", skip_all)]
 async fn mqtt_task(
     aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
