@@ -45,7 +45,7 @@ get_boss_ap_token() {
             apToken=$(echo $json | jq -r .ap_token)
             fika_log info "kap.boss.ap.token as $apToken"
             if [ -n "$apToken" ]; then
-                redis-cli SET kap.boss.ap.token "$apToken"
+                fika_redis SET kap.boss.ap.token "$apToken"
                 sed "s,^.*ap_access_token.*$,ap_access_token = \"$apToken\"," -i $KDAEMON_TOML_PATH
             fi
         fi

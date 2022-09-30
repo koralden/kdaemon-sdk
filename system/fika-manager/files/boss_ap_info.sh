@@ -12,7 +12,7 @@ fika_log debug "[$0] $@"
 info="$@"
 keySet="kap.boss.ap.info"
 
-old=$(redis-cli --raw GET ${keySet})
+old=$(fika_redis GET ${keySet})
 
 oldUserWallet=$(echo "$old" | jq -r .user_wallet)
 oldDeviceNickname=$(echo "$old" | jq -r .device_nickname)
@@ -20,8 +20,8 @@ oldDeviceNickname=$(echo "$old" | jq -r .device_nickname)
 newUserWallet=$(echo "$info" | jq -r .user_wallet)
 newDeviceNickname=$(echo "$info" | jq -r .device_nickname)
 
-redis-cli SET "${keySet}" "${info}" 2>&1 >/dev/null
-redis-cli EXPIRE ${keySet} 10 2>&1 >/dev/null
+fika_redis SET "${keySet}" "${info}" 2>&1 >/dev/null
+fika_redis EXPIRE ${keySet} 10 2>&1 >/dev/null
 fika_log info "[$0] save ${info}/10s into ${keySet}"
 
 provisionUpdate=false

@@ -26,5 +26,6 @@ feedback=$(jq -rcM --null-input \
     --argjson code "$code" \
     '{ "message": $msg, "code": $code }')
 
-redis-cli publish kap/aws/shadow/name/remote-manage "$feedback"
+#TODO, better use internal IPC channel
+fika_redis publish kap/aws/shadow/name/remote-manage "$feedback"
 echo $feedback

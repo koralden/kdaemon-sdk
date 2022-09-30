@@ -51,12 +51,13 @@ provision_sync_aws() {
     # flow: other call ->
     #       this(publish kap/aws/shadow/name/provision) ->
     #       manager/aws-iot(subscribe)
+    # TODO, better use rule.toml's subscribe 'provision' to output aws
     payload=$(provision_main)
     eval $(awk '/^topic.*provision/ {print "provisionTopic="$3}' /etc/fika_manager/rule.toml)
     ipcKey="$provisionTopic"
     if [ -n "$ipcKey" ]; then
         fika_log debug "[provision-sync-aws] publish $ipcKey $payload ..."
-        echo $payload | jq -c && redis-cli PUBLISH $ipcKey "$payload"
+        echo $payload | jq -c && fika_redis PUBLISH $ipcKey "$payload"
     fi
 }
 

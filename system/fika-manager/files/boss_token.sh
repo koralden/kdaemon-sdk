@@ -13,7 +13,7 @@ post_challenger() {
 
     #fika_log debug "[post_challenger]: tid=$tid challengeId=$challengeId"
 
-    challenger=$(redis-cli --raw HGET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid})
+    challenger=$(fika_redis HGET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid})
     hashed=$(echo $challenger | jq -r .hashed)
 
     report_boss_hcs "$cid" "$hashed" "$tid"
@@ -24,22 +24,22 @@ remove_expired_task() {
     local tid invalidT invalidS
 
     now=$(date +%s)
-    for item in $(redis-cli LRANGE ${KEY_BOSS_HCS_LIST} 0 -1); do
+    for item in $(fika_redis LRANGE ${KEY_BOSS_HCS_LIST} 0 -1); do
         [ -z "$item" ] && break
         tid=$(echo $item | jq -r .hcs_token)
         invalidT=$(echo $item | jq -r .invalid_time)
         invalidS=$(fika-manager misc -s $invalidT)
 
         if [ $now -ge $invalidS ]; then
-            for cc in $(redis-cli HKEYS ${KEY_BOSS_HCS_CHALLENGERS}.${tid}); do
+            for cc in $(fika_redis HKEYS ${KEY_BOSS_HCS_CHALLENGERS}.${tid}); do
                 post_challenger $tid $cc
             done
 
-            older=$(redis-cli LMOVE ${KEY_BOSS_HCS_LIST} ${KEY_BOSS_HCS_LIST}.history LEFT RIGHT)
+            older=$(fika_redis LMOVE ${KEY_BOSS_HCS_LIST} ${KEY_BOSS_HCS_LIST}.history LEFT RIGHT)
             fika_log info "[hcs] move ${older} to ${KEY_BOSS_HCS_LIST}.history"
-            if [ $(redis-cli LLEN ${KEY_BOSS_HCS_LIST}.history) -eq 128 ]; then
-                tid=$(redis-cli LPOP ${KEY_BOSS_HCS_LIST}.history | jq -r .hcs_token)
-                redis-cli DEL ${KEY_BOSS_HCS_CHALLENGERS}.${tid}
+            if [ $(fika_redis LLEN ${KEY_BOSS_HCS_LIST}.history) -eq 128 ]; then
+                tid=$(fika_redis LPOP ${KEY_BOSS_HCS_LIST}.history | jq -r .hcs_token)
+                fika_redis DEL ${KEY_BOSS_HCS_CHALLENGERS}.${tid}
                 fika_log warn "[hcs] drop ${tid} from ${KEY_BOSS_HCS_LIST}.history"
             fi
         else
@@ -62,17 +62,17 @@ get_main() {
     code=$(echo $tasks | jq -r .code)
     hcs=$(echo $tasks | jq -cr .hcs[])
     if [ "X$code" = "X200" -a -n "$hcs" ]; then
-        lastToken=$(redis-cli LINDEX ${KEY_BOSS_HCS_LIST} -1 | jq -r .hcs_token)
+        lastToken=$(fika_redis LINDEX ${KEY_BOSS_HCS_LIST} -1 | jq -r .hcs_token)
         [ -z "${lastToken}" -o "Xnull" = "X${lastToken}" ] && lastToken="0000000000"
 
         echo $tasks | jq -cr .hcs[] | \
             while read item; do
                 hcsToken=$(echo $item | jq -r .hcs_token)
                 if [ ${hcsToken} != ${lastToken} ]; then
-                    redis-cli RPUSH ${KEY_BOSS_HCS_LIST} "$item"
+                    fika_redis RPUSH ${KEY_BOSS_HCS_LIST} "$item"
 
-                    if [ $(redis-cli LLEN ${KEY_BOSS_HCS_LIST}) -eq 128 ]; then
-                        tid=$(redis-cli LPOP ${KEY_BOSS_HCS_LIST} | jq -r .hcs_token)
+                    if [ $(fika_redis LLEN ${KEY_BOSS_HCS_LIST}) -eq 128 ]; then
+                        tid=$(fika_redis LPOP ${KEY_BOSS_HCS_LIST} | jq -r .hcs_token)
                         fika_log error "[hcs] ${KEY_BOSS_HCS_LIST} overflow(128), drop ${tid}"
                         break
                     fi

@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. /etc/fika_manager/misc.sh
+
 code=200
 message="TODO"
 
@@ -8,10 +10,11 @@ check_ntp() {
 }
 
 check_boss_ap_token() {
-    apToken=$(redis-cli GET kap.boss.ap.token $accesstokenAp)
-    [ -n "$apToken" ] && return 0
-    code=400
-    message="boss ap-access-token not ready"
+    echo "TODO"
+    #apToken=$(fika_redis GET kap.boss.ap.token $accesstokenAp)
+    #[ -n "$apToken" ] && return 0
+    #code=400
+    #message="boss ap-access-token not ready"
 }
 
 #check_ntp
@@ -22,4 +25,4 @@ payload=$(jq -rcM --null-input \
     --arg message "$message" \
     '{ "code": $code, "message": $message }')
 
-redis-cli SET kdaemon.system.checking $payload
+fika_redis SET kdaemon.system.checking $payload

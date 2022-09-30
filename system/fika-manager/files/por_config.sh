@@ -41,9 +41,9 @@ main() {
     fi
 
     if [ $code -eq 200 ]; then
-        redis-cli PUBLISH ${DbKey}.ack success
+        fika_redis PUBLISH ${DbKey}.ack success
     else
-        redis-cli PUBLISH ${DbKey}.ack fail
+        fika_redis PUBLISH ${DbKey}.ack fail
     fi
     $networkChg && sleep 3 && network_apply
 

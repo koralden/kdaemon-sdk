@@ -12,7 +12,7 @@ fika_log debug "[$0] $@"
 info=$1 && shift
 APInfoKey="kap.boss.ap.info"
 
-redis-cli SET $APInfoKey "${info}" 2>&1 >/dev/null
+fika_redis SET $APInfoKey "${info}" 2>&1 >/dev/null
 fika_log info "[$0] save ${info} into $APInfoKey"
 
 newUserWallet=$(echo "$info" | jq -r .user_wallet)

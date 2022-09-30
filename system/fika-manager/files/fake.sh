@@ -46,7 +46,7 @@ publish_provision() {
         --arg owner "$owner" \
         '{"state":{"reported":{ "sdk-version": $sdk, "ap-wallet-address": $wallet, "nickname": $nickname, "owner": $owner }},"clientToken": "11111"}')
 
-    redis-cli publish kap/aws/raw/things/${kdaemon_thing}/shadow/name/provision/update "$msg"
+    fika_redis publish kap/aws/raw/things/${kdaemon_thing}/shadow/name/provision/update "$msg"
 }
 
 publish_heartbeat() {
@@ -63,7 +63,7 @@ publish_heartbeat() {
         --argjson latency "$latency" \
         --arg systime "$systime" \
         '{"state":{"reported":{"up-time": $uptime, "latency": $latency, "system-time": $systime}},"clientToken": "11111"}')
-    redis-cli publish kap/aws/raw/things/${kdaemon_thing}/shadow/name/heartbeat/update "$msg"
+    fika_redis publish kap/aws/raw/things/${kdaemon_thing}/shadow/name/heartbeat/update "$msg"
 }
 
 test_loop() {

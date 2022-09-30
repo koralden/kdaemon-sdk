@@ -58,9 +58,7 @@ report_boss_hcs_json() {
     code=$(echo $response | jq -r .code)
     if [ "X$code" = "X200" ]; then
         changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
-        redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
-
-        fika_log debug "[hcs] redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${changed}"
+        fika_redis HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
         true
     else
         fika_log error "[hcs] POST $json ${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet} fail"
@@ -75,7 +73,7 @@ report_boss_hcs() {
     hashed=$1 && shift
     tid=$1 && shift
 
-    [ "X$(redis-cli HGET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} | jq .sent)" = "Xtrue" ] && return
+    [ "X$(fika_redis HGET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} | jq .sent)" = "Xtrue" ] && return
 
     raw="hcs_token=${tid}&ap_wallet=${kapWallet}&hash=${hashed}"
 
@@ -85,8 +83,7 @@ report_boss_hcs() {
     code=$(echo $response | jq -r .code)
     if [ "X$code" = "X200" ]; then
         changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
-        redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
-        fika_log debug "[hcs] redis-cli HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} ${changed}"
+        fika_redis HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
         true
     else
         fika_log error "[hcs] POST $raw ${rootUrl}/${apHcsPath} fail"
@@ -102,12 +99,12 @@ post_main() {
 
     cid=$1 && shift
 
-    tid=$(redis-cli LINDEX ${KEY_BOSS_HCS_LIST} 0 | jq -r .hcs_token)
+    tid=$(fika_redis LINDEX ${KEY_BOSS_HCS_LIST} 0 | jq -r .hcs_token)
     [ -z "${tid}" -o "Xnull" = "X${tid}" ] \
         && fika_log error "[hcs] not task for ${cid}" \
         && exit 127
 
-    challenger=$(redis-cli --raw HGET "${KEY_BOSS_HCS_CHALLENGERS}.${tid}" "${cid}")
+    challenger=$(fika_redis HGET "${KEY_BOSS_HCS_CHALLENGERS}.${tid}" "${cid}")
     if [ -z "$challenger" ]; then
         fika_log debug "[hcs] No any challengers in this task-${tid}"
         exit 0

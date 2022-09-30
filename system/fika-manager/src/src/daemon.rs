@@ -583,7 +583,8 @@ async fn mqtt_task(
             (Some(dedicated), Some(provision)) => {
                 let cfg = &kcfg;
                 match mqtt_dedicated_create(&cfg.cmp).await {
-                    Err(_) => {
+                    Err(e) => {
+                        error!("MQTT dedicated create fail - {:?}, run provsion?", e);
                         match mqtt_provision_task(cfg, &provision, db_chan.clone()).await {
                             Ok(_) => {
                                 let db_chan = db_chan.clone();
@@ -605,6 +606,7 @@ async fn mqtt_task(
                         }
                     }
                     Ok(mut iot) => {
+                        debug!("MQTT dedicated create success, start it");
                         let thing_name = cfg.cmp.thing.as_ref().unwrap();
                         let mut retry = 1;
                         loop {

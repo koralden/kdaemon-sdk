@@ -7,9 +7,9 @@ fika_log() {
     level=$1 && shift
 
     if [ -e /dev/log ]; then
-        logger -p ${level} "$@"
+        logger -p ${level} -- "$@"
     else
-        echo "[${level}] $@"
+        echo -- "[${level}] $@"
     fi
 }
 
@@ -30,4 +30,40 @@ update_kdaemon_toml() {
     echo $val | grep -q -i -E "(false)|(true)" && str=$val
 
     sed "s,^#*$key.*$,$key = $str,g" -i $KDAEMON_TOML_PATH && sync
+}
+
+#loop() {
+#    for var in "$@"; do
+#        echo "=>$var"
+#    done
+#}
+
+fika_redis() {
+    fika_log debug "[redis-cache] $#/$@"
+    cmd=$1 && shift
+    if [ $# -ge 1 ]; then
+        key=$1 && shift
+        if [ $# -ge 1 ]; then
+            val1=$1 && shift
+            if [ $# -ge 1 ]; then
+                val2=$1 && shift
+                if [ $# -ge 1 ]; then 
+                    val3=$1 && shift
+                    redis-cli ${cmd} "${key}" "${val1}" "${val2}" "${val3}" $@
+                else
+                    redis-cli ${cmd} "${key}" "${val1}" "${val2}"
+                fi
+            else
+                redis-cli ${cmd} "${key}" "${val1}"
+            fi
+        else
+            redis-cli ${cmd} "${key}"
+        fi
+    else
+        redis-cli ${cmd}
+    fi
+}
+
+fika_jq() {
+    jq $@
 }
