@@ -20,7 +20,7 @@ use tokio::time::{self, Duration};
 
 use crate::subscribe_task::SubscribeCmd;
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[allow(dead_code)]
 pub struct RuleAwsIotProvisionConfig {
     pub ca: String,
@@ -36,7 +36,7 @@ impl RuleAwsIotProvisionConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
 #[allow(dead_code)]
 pub struct RuleAwsIotDedicatedConfig {
     pub pull_topic: Option<Vec<String>>,
@@ -89,6 +89,7 @@ pub async fn mqtt_provision_task(
         .collect::<String>();
     let sku = cfg.core.sku.clone();
     let endpoint = cfg.cmp.endpoint.clone();
+    let model = provision.thing_prefix.clone().to_ascii_uppercase();
 
     let client_id = format!("pid-{}", &serial_number[(serial_number.len() - 5)..]);
     let aws = AWSIoTSettings::new(
@@ -125,6 +126,7 @@ pub async fn mqtt_provision_task(
                                                 let payload = json!({
                                                     "certificateOwnershipToken": g.certificate_ownership_token,
                                                     "parameters": {
+                                                        "Model": model,
                                                         "SerialNumber": serial_number,
                                                         "MAC": mac_address,
                                                         "DeviceLocation": sku,
@@ -725,3 +727,52 @@ pub async fn mqtt_ipc_post(
 
     Ok(())
 }
+
+// AwsConnector
+//     ::build(CmpConfig) -> 
+// FleetProvision
+//     ::new(ca, cert, key)
+//     .register(sn, mac, model) ->
+// AwsConnector
+//     .open(ca, cert, key)
+//     .subscribe(...)
+//     .start()
+
+/*#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[allow(dead_code)]
+struct AwsConnectCfg {
+    provision: RuleAwsIotProvisionConfig,
+    pull: RuleAwsIotDedicatedConfig,
+    dedicated: KCmpConfig,
+}
+
+trait ConnectState {}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[allow(dead_code)]
+struct AwsConnector<S: ConnectState> {
+    cfg: Box<AwsConnectCfg>,
+    extra: S,
+}
+
+struct AwsProvision {
+    sn: String,
+    mac: String,
+    model: String,
+}
+
+struct AwsDedicated {
+    thing: String,
+}
+
+impl ConnectState for AwsProvision {}
+impl ConnectState for AwsDedicated {}
+
+impl AwsConnector<AwsProvision> {
+    fn build(
+        provision: RuleAwsIotProvisionConfig,
+        pull: RuleAwsIotDedicatedConfig,
+        dedicated: KCmpConfig,
+    ) -> Sef {
+    }
+}*/

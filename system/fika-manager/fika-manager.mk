@@ -38,8 +38,8 @@ define FIKA_MANAGER_INSTALL_MISC
 	#$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/factory.toml.sample $(TARGET_DIR)/etc/fika_manager/factory.toml
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/recovery.toml.sample $(TARGET_DIR)/etc/fika_manager/recovery.toml
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/kdaemon.toml.sample $(TARGET_DIR)/etc/fika_manager/kdaemon.toml.sample
-	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/bootstrap-online-ap.certificate.pem $(TARGET_DIR)/etc/fika_manager/bootstrap-online-ap.certificate.pem
-	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/bootstrap-online-ap.private.key $(TARGET_DIR)/etc/fika_manager/bootstrap-online-ap.private.key
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/bootstrap-inactive.certificate.pem $(TARGET_DIR)/etc/fika_manager/bootstrap-inactive.certificate.pem
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/bootstrap-inactive.private.key $(TARGET_DIR)/etc/fika_manager/bootstrap-inactive.private.key
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/AmazonRootCA1.pem $(TARGET_DIR)/etc/fika_manager/AmazonRootCA1.pem
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_manager/factory
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_manager/thirdparty
