@@ -1,35 +1,34 @@
 use anyhow::Result;
-use tracing::{debug, error, warn};
-use tokio::sync::mpsc;
+use process_stream::Process;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
-use process_stream::Process;
+use tracing::{debug, error, warn};
 
-use crate::DbCommand;
 use crate::publish_task::capture_process_stream;
+use crate::DbCommand;
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum SubscribeCmd {
-    Notify {
-        topic: String,
-        msg: String,
-    },
+    Notify { topic: String, msg: String },
     Exit,
 }
 
 pub async fn subscribe_ipc_post(
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
     msg: Option<redis::Msg>,
-    ) -> Result<()> {
+) -> Result<()> {
     if let Some(msg) = msg {
         if let Ok(topic) = msg.get_channel::<String>() {
             let payload = msg.get_payload::<String>().unwrap_or("".into());
-            subscribe_ipc_tx.send(SubscribeCmd::Notify {
-                topic,
-                msg: payload
-            }).await?;
+            subscribe_ipc_tx
+                .send(SubscribeCmd::Notify {
+                    topic,
+                    msg: payload,
+                })
+                .await?;
         } else {
             warn!("ipc/sub-task not channel? - {:?}?", msg);
         }
@@ -57,7 +56,7 @@ pub async fn subscribe_main(
     mut subscribe_rx: mpsc::Receiver<SubscribeCmd>,
     _chan_tx: mpsc::Sender<DbCommand>,
     entries: HashMap<String, PathBuf>,
-    ) -> Result<()> {
+) -> Result<()> {
     loop {
         tokio::select! {
             Some(msg) = subscribe_rx.recv() => {

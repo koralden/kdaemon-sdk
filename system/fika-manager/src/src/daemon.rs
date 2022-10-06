@@ -8,33 +8,29 @@ use tokio::fs;
 use tokio::signal;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::time::{self, Duration, Instant};
-use tracing::{debug, error, info, warn, instrument};
+use tracing::{debug, error, info, instrument, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 //use bytes::Bytes;
 use std::iter::repeat_with;
 //use futures_util::stream::stream::StreamExt;
 //use futures_util::StreamExt as _;
+use chrono::prelude::*;
 use process_stream::StreamExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use chrono::prelude::*;
 
 //use std::io;
 use crate::aws_iot::{
-    mqtt_dedicated_create, mqtt_dedicated_create_start,
-    mqtt_dedicated_start, mqtt_provision_task,
-    AwsIotCmd, mqtt_ipc_register, mqtt_ipc_post,
+    mqtt_dedicated_create, mqtt_dedicated_create_start, mqtt_dedicated_start, mqtt_ipc_post,
+    mqtt_ipc_register, mqtt_provision_task, AwsIotCmd,
 };
 use crate::aws_iot::{RuleAwsIotDedicatedConfig, RuleAwsIotProvisionConfig};
 use crate::kap_daemon::KdaemonConfig;
-use crate::DbCommand;
+use crate::publish_task::{publish_main, spawn_task_run_path_publish, RuleConfigTask};
 use crate::subscribe_task::{
-    SubscribeCmd, subscribe_ipc_register,
-    subscribe_ipc_post, subscribe_main};
-use crate::publish_task::{
-    RuleConfigTask,
-    publish_main, spawn_task_run_path_publish
+    subscribe_ipc_post, subscribe_ipc_register, subscribe_main, SubscribeCmd,
 };
+use crate::DbCommand;
 
 #[derive(Debug, Args)]
 #[clap(
@@ -112,7 +108,11 @@ struct State {
 async fn _conn_rpc_init(
     url: String,
     shared: Arc<Mutex<State>>,
-) -> (Option<redis::Client>, Option<redis::aio::PubSub>, Option<redis::aio::PubSub>) {
+) -> (
+    Option<redis::Client>,
+    Option<redis::aio::PubSub>,
+    Option<redis::aio::PubSub>,
+) {
     if let Ok(cacher) = redis::Client::open(url) {
         //let mut conn = cacher.get_async_connection().await?;
 
@@ -128,7 +128,10 @@ async fn _conn_rpc_init(
 
         let subscribe_conn = if let Ok(subscribe_conn) = cacher.get_async_connection().await {
             let mut subscribe_conn = subscribe_conn.into_pubsub();
-            if wrap_subscribe_ipc_register(shared, &mut subscribe_conn).await.is_err() {
+            if wrap_subscribe_ipc_register(shared, &mut subscribe_conn)
+                .await
+                .is_err()
+            {
                 warn!("subscribe-task ipc register fail");
             }
             //let mut subscribe_stream = subscribe_conn.on_message();
@@ -164,9 +167,7 @@ async fn conn_access_task(
     }
 
     let mut conn = conn.unwrap();
-    let aws_conn = cacher
-        .get_async_connection()
-        .await;
+    let aws_conn = cacher.get_async_connection().await;
     if let Err(e) = aws_conn {
         error!("[rpc-core] aws redis async connection fail - {:?}", &e);
         return Err(anyhow!("[rpc-core] aws async connection {:?}", e));
@@ -179,11 +180,12 @@ async fn conn_access_task(
     }
     let mut aws_stream = aws_conn.on_message();
 
-    let subscribe_conn = cacher
-        .get_async_connection()
-        .await;
+    let subscribe_conn = cacher.get_async_connection().await;
     if let Err(e) = subscribe_conn {
-        error!("[rpc-core] subscribe redis async connection fail - {:?}", &e);
+        error!(
+            "[rpc-core] subscribe redis async connection fail - {:?}",
+            &e
+        );
         return Err(anyhow!("[rpc-core] subscribe async connection {:?}", e));
     }
     let mut subscribe_conn = subscribe_conn.unwrap().into_pubsub();
@@ -279,7 +281,6 @@ async fn wrap_subscribe_ipc_register(
     shared: Arc<Mutex<State>>,
     sub: &mut redis::aio::PubSub,
 ) -> Result<()> {
-
     let sub_list: Option<Vec<String>>;
     {
         let state = shared.lock().unwrap();
@@ -330,7 +331,7 @@ async fn subscribe_task(
 async fn publish_task(
     chan_tx: mpsc::Sender<DbCommand>,
     aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
-    shared: Arc<Mutex<State>>
+    shared: Arc<Mutex<State>>,
 ) -> Result<()> {
     let mut entries: HashMap<String, RuleConfigTask> = HashMap::new();
     if let Ok(state) = shared.lock() {
@@ -424,10 +425,7 @@ pub async fn daemon(opt: DaemonOpt) -> Result<(), MyError> {
     let (subscribe_tx, subscribe_rx) = mpsc::channel::<SubscribeCmd>(32);
 
     let url = cfg.core.database.clone();
-    let shared = Arc::new(Mutex::new(State {
-        cfg,
-        rule,
-    }));
+    let shared = Arc::new(Mutex::new(State { cfg, rule }));
 
     let _conn_task = tokio::spawn(conn_access_task(
         url,
@@ -444,13 +442,15 @@ pub async fn daemon(opt: DaemonOpt) -> Result<(), MyError> {
         shared.clone(),
     ));
     let _pub_task = tokio::spawn(publish_task(
-            chan_tx.clone(),
-            aws_ipc_tx.clone(),
-            shared.clone()));
+        chan_tx.clone(),
+        aws_ipc_tx.clone(),
+        shared.clone(),
+    ));
     let _cron_task = tokio::spawn(honest_task(
-            chan_tx.clone(),
-            aws_ipc_tx.clone(),
-            shared.clone()));
+        chan_tx.clone(),
+        aws_ipc_tx.clone(),
+        shared.clone(),
+    ));
     let _mqtt_task = tokio::spawn(mqtt_task(
         aws_ipc_rx,
         chan_tx.clone(),
@@ -486,8 +486,8 @@ struct BossHcsPair {
 async fn honest_task(
     chan_tx: mpsc::Sender<DbCommand>,
     aws_ipc_tx: mpsc::Sender<AwsIotCmd>,
-    shared: Arc<Mutex<State>>)
-{
+    shared: Arc<Mutex<State>>,
+) {
     let key_hcs_list = "boss.hcs.token.list";
     let mut fail_cycle = Duration::from_secs(10);
     let mut ok_cycle = Duration::from_secs(10);
@@ -594,11 +594,11 @@ async fn mqtt_task(
                                     aws_ipc_rx,
                                     db_chan.clone(),
                                     subscribe_ipc_tx.clone(),
-                                    )
-                                    .await
-                                    {
-                                        error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
-                                    }
+                                )
+                                .await
+                                {
+                                    error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
+                                }
                             }
                             Err(e) => {
                                 error!("MQTT provision function(from dedicated) not work - {:?}", e)
@@ -617,7 +617,8 @@ async fn mqtt_task(
                                 thing_name.clone(),
                                 iot,
                                 dedicated.pull_topic.clone(),
-                                ).await;
+                            )
+                            .await;
 
                             retry = retry + 1;
                             if retry == 100 {
@@ -636,9 +637,14 @@ async fn mqtt_task(
                 match mqtt_provision_task(cfg, &provision, db_chan.clone()).await {
                     Ok(_) => {
                         let db_chan = db_chan.clone();
-                        if let Err(e) =
-                            mqtt_dedicated_create_start(cfg, None,
-                                    aws_ipc_rx, db_chan, subscribe_ipc_tx).await
+                        if let Err(e) = mqtt_dedicated_create_start(
+                            cfg,
+                            None,
+                            aws_ipc_rx,
+                            db_chan,
+                            subscribe_ipc_tx,
+                        )
+                        .await
                         {
                             error!(
                                 "MQTT 1nd dedicated function(from provision) not work - {:?}",

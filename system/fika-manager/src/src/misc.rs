@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
+use ethers::prelude::*;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 use tracing::{debug, error, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use std::collections::HashMap;
-use serde_json::{json, Value};
-use ethers::prelude::*;
 
 use chrono::prelude::*;
 //use std::path::PathBuf;
@@ -14,7 +14,11 @@ use crate::kap_daemon::KdaemonConfig;
 #[derive(Args, Debug)]
 #[clap(about = "Curl-like")]
 struct CurlAnyOpt {
-    #[clap( short = 'o', long = "output", default_value = "/userdata/crypto_wallet.json")]
+    #[clap(
+        short = 'o',
+        long = "output",
+        default_value = "/userdata/crypto_wallet.json"
+    )]
     output: String,
 }
 
@@ -141,7 +145,7 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
     } else {
         boss.access_token
     };
-    
+
     let token = if let Some(token) = b.access_token {
         Some(token)
     } else {
@@ -175,23 +179,25 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
-                   &region,
-                   &url, &wallet,
-                   response);
+            debug!(
+                r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
+                &region, &url, &wallet, response
+            );
 
             if response["code"] == 200 {
                 if let Some(str) = response["ap_token"].as_str() {
                     println!("{}", str);
                 } else {
-                    return Err(anyhow::anyhow!("{} slice fail",
-                                               response["ap_token"]));
+                    return Err(anyhow::anyhow!("{} slice fail", response["ap_token"]));
                 }
             } else {
-                return Err(anyhow::anyhow!("{} [{}]",
-                       response["message"], response["code"]));
+                return Err(anyhow::anyhow!(
+                    "{} [{}]",
+                    response["message"],
+                    response["code"]
+                ));
             }
-        },
+        }
         CurlBossPath::PostApHcs(map) => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
@@ -218,20 +224,26 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X POST -d '{:?}' '{}?ap_wallet={}' => {:?}"#,
-                   &region, &token,
-                   &map.json.to_string(),
-                   &url, &wallet,
-                   response);
+            debug!(
+                r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X POST -d '{:?}' '{}?ap_wallet={}' => {:?}"#,
+                &region,
+                &token,
+                &map.json.to_string(),
+                &url,
+                &wallet,
+                response
+            );
 
             if response["code"] == 200 {
                 println!("{}", response["data"]);
             } else {
-                return Err(anyhow::anyhow!("{} [{}]",
-                       response["message"], response["code"]));
+                return Err(anyhow::anyhow!(
+                    "{} [{}]",
+                    response["message"],
+                    response["code"]
+                ));
             }
-
-        },
+        }
         CurlBossPath::GetOtp => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
@@ -257,18 +269,21 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
-                   &region, &token,
-                   &url, &wallet,
-                   response);
+            debug!(
+                r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
+                &region, &token, &url, &wallet, response
+            );
 
             if response["code"] == 200 {
                 println!("{}", response);
             } else {
-                return Err(anyhow::anyhow!("{} [{}]",
-                           response["message"], response["code"]));
+                return Err(anyhow::anyhow!(
+                    "{} [{}]",
+                    response["message"],
+                    response["code"]
+                ));
             }
-        },
+        }
         CurlBossPath::GetHcs => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
@@ -294,18 +309,21 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
-                   &region, &token,
-                   &url, &wallet,
-                   response);
+            debug!(
+                r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
+                &region, &token, &url, &wallet, response
+            );
 
             if response["code"] == 200 {
                 println!("{}", response["hcs"]);
             } else {
-                return Err(anyhow::anyhow!("{} [{}]",
-                           response["message"], response["code"]));
+                return Err(anyhow::anyhow!(
+                    "{} [{}]",
+                    response["message"],
+                    response["code"]
+                ));
             }
-        },
+        }
         CurlBossPath::GetApInfo => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
@@ -333,20 +351,25 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET -d '{}' '{}' => {:?}"#,
-                   &region, &token,
-                   &json!(&map).to_string(),
-                   &url,
-                   response);
+            debug!(
+                r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET -d '{}' '{}' => {:?}"#,
+                &region,
+                &token,
+                &json!(&map).to_string(),
+                &url,
+                response
+            );
 
             if response["code"] == 200 {
                 println!("{}", response["data"]);
             } else {
-                return Err(anyhow::anyhow!("{} [{}]",
-                       response["message"], response["code"]));
+                return Err(anyhow::anyhow!(
+                    "{} [{}]",
+                    response["message"],
+                    response["code"]
+                ));
             }
-
-        },
+        }
         CurlBossPath::GetApWallet(map) => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
@@ -370,24 +393,28 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -X GET -d {:?} '{}' => {:?}"#,
-                   &region,
-                   &map.json.to_string(),
-                   &url,
-                   response);
+            debug!(
+                r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -X GET -d {:?} '{}' => {:?}"#,
+                &region,
+                &map.json.to_string(),
+                &url,
+                response
+            );
 
             if response["code"] == 200 {
                 if let Some(str) = response["data"]["wallet"].as_str() {
                     println!("{}", str);
                 } else {
-                    return Err(anyhow::anyhow!("{} slice fail",
-                                               response["data"]["wallet"]));
+                    return Err(anyhow::anyhow!("{} slice fail", response["data"]["wallet"]));
                 }
             } else {
-                return Err(anyhow::anyhow!("{} [{}]",
-                       response["message"], response["code"]));
+                return Err(anyhow::anyhow!(
+                    "{} [{}]",
+                    response["message"],
+                    response["code"]
+                ));
             }
-        },
+        }
     }
 
     Ok(())
@@ -399,7 +426,7 @@ async fn do_wallet(w: WalletCommand) -> Result<()> {
         WalletCommand::Generate(_cfg) => {
             let wallet = LocalWallet::new(&mut rand::thread_rng());
             println!("{:?}", wallet.address());
-        },
+        }
     }
     Ok(())
 }
@@ -425,19 +452,19 @@ pub async fn misc(opt: MiscOpt) -> Result<()> {
     match opt.commands {
         MiscCommand::Timestamp(t) => {
             do_timestamp(t.timestamp).await?;
-        },
+        }
         MiscCommand::Rfc3339 => {
             do_rfc3339().await?;
-        },
+        }
         MiscCommand::Curl(c) => {
             do_curl(c).await?;
-        },
+        }
         MiscCommand::Boss(b) => {
             do_boss(b).await?;
-        },
+        }
         MiscCommand::Wallet(w) => {
             do_wallet(w).await?;
-        },
+        }
     }
 
     Ok(())

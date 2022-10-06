@@ -10,8 +10,8 @@ pub mod misc;
 pub use self::misc::{misc, MiscOpt};
 pub mod daemon;
 pub use self::daemon::{daemon, DaemonOpt};
-pub mod subscribe_task;
 pub mod publish_task;
+pub mod subscribe_task;
 
 #[derive(Debug)]
 #[allow(dead_code)]

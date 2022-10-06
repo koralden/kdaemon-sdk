@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Result};
-use tracing::{debug, error, info, instrument, warn};
-use tokio::sync::mpsc;
+use process_stream::{Process, ProcessItem, Stream, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use tokio::time::{self, Duration, Instant};
-use process_stream::{Process, ProcessItem, Stream, StreamExt};
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+use tokio::time::{self, Duration, Instant};
+use tracing::{debug, error, info, instrument, warn};
 
-use crate::{publish_message, set_message, DbCommand};
 use crate::aws_iot::AwsIotCmd;
+use crate::{publish_message, set_message, DbCommand};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[allow(dead_code)]
@@ -163,9 +163,12 @@ pub async fn publish_main(
 
     for (_topic, task) in &entries {
         let RuleConfigTask {
-            topic, path,
-            start_at, period,
-            db_publish, db_set,
+            topic,
+            path,
+            start_at,
+            period,
+            db_publish,
+            db_set,
             aws_publish,
         } = task;
 
@@ -202,8 +205,10 @@ pub async fn publish_main(
                         topic.to_string(),
                         path.to_path_buf(),
                         timeout,
-                        *db_publish, *db_set,
-                        *aws_publish, aws_ipc_tx.clone(),
+                        *db_publish,
+                        *db_set,
+                        *aws_publish,
+                        aws_ipc_tx.clone(),
                     );
                 }
             }
