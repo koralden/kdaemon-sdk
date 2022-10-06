@@ -14,7 +14,7 @@ anyhow = "1.0.58"
 async-trait = "0.1.56"
 bytes = "1.1.0"
 chrono = { version = "0.4.22", features = ["serde"] }
-clap = { version = "3.2.5", features = ["derive"] }
+clap = { version = "^3.2.5", features = ["derive"] }
 fastrand = "1.7.0"
 futures-util = "0.3.21"
 mqtt4bytes = "0.4.0"
@@ -30,3 +30,5 @@ tracing = "0.1.35"
 tracing-futures = "0.2.5"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 aws-iot-device-sdk-rust = { path = "aws-iot-device-sdk-rust" }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+ethers = { git = "https://github.com/gakonst/ethers-rs" }
