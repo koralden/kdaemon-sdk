@@ -3,7 +3,7 @@ use clap::{Args, Subcommand};
 use tracing::{debug, error, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::collections::HashMap;
-use serde_json::Value;
+use serde_json::{json, Value};
 use ethers::prelude::*;
 
 use chrono::prelude::*;
@@ -13,13 +13,21 @@ use crate::kap_daemon::KdaemonConfig;
 
 #[derive(Args, Debug)]
 #[clap(about = "Curl-like")]
-pub struct CurlAnyOpt {
-    #[clap(
-        short = 'o',
-        long = "output",
-        default_value = "/userdata/crypto_wallet.json"
-        )]
-        output: String,
+struct CurlAnyOpt {
+    #[clap( short = 'o', long = "output", default_value = "/userdata/crypto_wallet.json")]
+    output: String,
+}
+
+#[derive(Args, Debug)]
+struct ApWalletOpt {
+    #[clap(help = r#"{"who": $who, "where": $where, "comment": $comment }"#)]
+    json: Value,
+}
+
+#[derive(Args, Debug)]
+struct ApHcsOpt {
+    #[clap(help = r#"{"ap_wallet":$wallet,"hcs_token":$hcs_token,"hash":$hash}"#)]
+    json: Value,
 }
 
 #[derive(Subcommand, Debug)]
@@ -29,8 +37,8 @@ enum CurlBossPath {
     GetOtp,
     GetHcs,
     GetApInfo,
-    GetApWallet,
-    PostApHcs,
+    GetApWallet(ApWalletOpt),
+    PostApHcs(ApHcsOpt),
 }
 
 #[derive(Args, Debug)]
@@ -167,16 +175,24 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 .json::<Value>()
                 .await?;
 
-            debug!("[kap][boss] {} get as {:?}", url, response);
+            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
+                   &region,
+                   &url, &wallet,
+                   response);
 
             if response["code"] == 200 {
-                println!("{}", response["ap_token"]);
+                if let Some(str) = response["ap_token"].as_str() {
+                    println!("{}", str);
+                } else {
+                    return Err(anyhow::anyhow!("{} slice fail",
+                                               response["ap_token"]));
+                }
             } else {
                 return Err(anyhow::anyhow!("{} [{}]",
                        response["message"], response["code"]));
             }
         },
-        CurlBossPath::PostApHcs => {
+        CurlBossPath::PostApHcs(map) => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
                 return Err(anyhow!("[kap][boss] ap-acess-token not exist"));
@@ -185,24 +201,28 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
             let path = if let Some(path) = b.path {
                 path
             } else {
-                boss.ap_info_path
+                boss.ap_hcs_path
             };
 
             let url = format!("{}/{}", root_url, &path);
-            let mut map = HashMap::new();
-            map.insert("ap_wallet", &wallet);
+            let token = token.unwrap();
 
             let response = client
                 .post(&url)
                 .header("ACCESSTOKEN", &region)
-                .header("ACCESSTOKEN-AP", &token.unwrap())
-                .json(&map)
+                .header("ACCESSTOKEN-AP", &token)
+                .json(&map.json)
+                .query(&[("ap_wallet", &wallet)])
                 .send()
                 .await?
                 .json::<Value>()
                 .await?;
 
-            debug!("[kap][boss] {} get as {:?}", url, response);
+            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X POST -d '{:?}' '{}?ap_wallet={}' => {:?}"#,
+                   &region, &token,
+                   &map.json.to_string(),
+                   &url, &wallet,
+                   response);
 
             if response["code"] == 200 {
                 println!("{}", response["data"]);
@@ -224,19 +244,23 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 boss.otp_path
             };
 
+            let token = token.unwrap();
             let url = format!("{}/{}", root_url, &path);
 
             let response = client
                 .get(&url)
                 .header("ACCESSTOKEN", &region)
-                .header("ACCESSTOKEN-AP", &token.unwrap())
+                .header("ACCESSTOKEN-AP", &token)
                 .query(&[("ap_wallet", &wallet)])
                 .send()
                 .await?
                 .json::<Value>()
                 .await?;
 
-            debug!("[kap][boss] {} get as {:?}", url, response);
+            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
+                   &region, &token,
+                   &url, &wallet,
+                   response);
 
             if response["code"] == 200 {
                 println!("{}", response);
@@ -257,19 +281,23 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 boss.hcs_path
             };
 
+            let token = token.unwrap();
             let url = format!("{}/{}", root_url, &path);
 
             let response = client
                 .get(&url)
                 .header("ACCESSTOKEN", &region)
-                .header("ACCESSTOKEN-AP", &token.unwrap())
+                .header("ACCESSTOKEN-AP", &token)
                 .query(&[("ap_wallet", &wallet)])
                 .send()
                 .await?
                 .json::<Value>()
                 .await?;
 
-            debug!("[kap][boss] {} get as {:?}", url, response);
+            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET '{}?ap_wallet={}' => {:?}"#,
+                   &region, &token,
+                   &url, &wallet,
+                   response);
 
             if response["code"] == 200 {
                 println!("{}", response["hcs"]);
@@ -290,6 +318,7 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
                 boss.ap_info_path
             };
 
+            let token = token.unwrap();
             let url = format!("{}/{}", root_url, &path);
             let mut map = HashMap::new();
             map.insert("ap_wallet", &wallet);
@@ -297,14 +326,18 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
             let response = client
                 .get(&url)
                 .header("ACCESSTOKEN", &region)
-                .header("ACCESSTOKEN-AP", &token.unwrap())
+                .header("ACCESSTOKEN-AP", &token)
                 .json(&map)
                 .send()
                 .await?
                 .json::<Value>()
                 .await?;
 
-            debug!("[kap][boss] {} get as {:?}", url, response);
+            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -H "ACCESSTOKEN-AP:{}" -X GET -d '{}' '{}' => {:?}"#,
+                   &region, &token,
+                   &json!(&map).to_string(),
+                   &url,
+                   response);
 
             if response["code"] == 200 {
                 println!("{}", response["data"]);
@@ -314,7 +347,7 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
             }
 
         },
-        CurlBossPath::GetApWallet => {
+        CurlBossPath::GetApWallet(map) => {
             if token.is_none() {
                 error!("[kap][boss] ap-acess-token not exist");
                 return Err(anyhow!("[kap][boss] ap-acess-token not exist"));
@@ -327,24 +360,29 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
             };
 
             let url = format!("{}/{}", root_url, &path);
-            let mut map = HashMap::new();
-            map.insert("who", wallet.as_str());
-            map.insert("where", "nowhere");
-            map.insert("comment", "from kap");
 
             let response = client
                 .get(&url)
                 .header("ACCESSTOKEN", &region)
-                .json(&map)
+                .json(&map.json)
                 .send()
                 .await?
                 .json::<Value>()
                 .await?;
 
-            debug!("[kap][boss] {} get as {:?}", url, response);
+            debug!(r#"[kap][boss] curl -s -H "ACCESSTOKEN:{}" -X GET -d {:?} '{}' => {:?}"#,
+                   &region,
+                   &map.json.to_string(),
+                   &url,
+                   response);
 
             if response["code"] == 200 {
-                println!("{}", response["data"]["wallet"]);
+                if let Some(str) = response["data"]["wallet"].as_str() {
+                    println!("{}", str);
+                } else {
+                    return Err(anyhow::anyhow!("{} slice fail",
+                                               response["data"]["wallet"]));
+                }
             } else {
                 return Err(anyhow::anyhow!("{} [{}]",
                        response["message"], response["code"]));
