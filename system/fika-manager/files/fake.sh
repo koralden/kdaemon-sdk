@@ -6,21 +6,13 @@ RootFake="/root/fake"
 RootBoss="/root/boss"
 
 boss_ap_info() {
+    local info
+
     conf=$1
-    load_kdaemon_toml $RootFake/$conf/kdaemon.toml
 
-    local data info code wallet
-
-    data=$(jq -rcM --null-input --arg wallet "${kdaemon_wallet_address}" '{"ap_wallet": $wallet}')
-
-    info=$(curl -s -H "ACCESSTOKEN:${kdaemon_access_token}" -H "ACCESSTOKEN-AP:${kdaemon_ap_access_token}" -H 'Content-Type: text/plain' -X GET --data-raw $data "${kdaemon_root_url}/${kdaemon_ap_info_path}")
-
-    fika_log debug "curl -s -H ACCESSTOKEN:${kdaemon_access_token} -H ACCESSTOKEN-AP:${kdaemon_ap_access_token} -H 'Content-Type: text/plain' -X GET --data-raw $data ${kdaemon_root_url}/${kdaemon_ap_info_path} => ${info}"
-
-    code=$(echo $info | jq -r .code)
-    if [ "X$code" = "X200" ]; then
-        echo "user_wallet = \"$(echo $info | jq -r .data.user_wallet)\"" >$RootBoss/$conf
-        echo "nickname = \"$(echo $info | jq -r .data.device_nickname)\"" >>$RootBoss/$conf
+    if info=$(fika-manager boss -c $RootFake/$conf/kdaemon.toml get-ap-info) ; then
+        echo "user_wallet = \"$(echo $info | jq -r .user_wallet)\"" >$RootBoss/$conf
+        echo "nickname = \"$(echo $info | jq -r .device_nickname)\"" >>$RootBoss/$conf
         sync;sync
         return 0
     else

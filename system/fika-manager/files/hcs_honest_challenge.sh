@@ -40,48 +40,29 @@ db_fetch() {
     true
 }
 
-report_boss_hcs_json() {
-    local cid hashed changed json tid
-
-    cid=$1 && shift
-    hashed=$1 && shift
-    tid=$1 && shift
-
-    json=$(jq -rcM --null-input \
-        --arg wallet "$cid" \
-        --arg hashed "$hashed" \
-        '{ "app_wallet": $wallet, "hashed": $hashed}')
-
-    response=$(curl -s -H "ACCESSTOKEN:${accessToken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -X POST -d $json "${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet}")
-    fika_log debug "[hcs] curl -H \"ACCESSTOKEN:${accessToken}\" -H \"ACCESSTOKEN-AP:${accesstokenAp}\" -d $json ${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet} => ${response}"
-
-    code=$(echo $response | jq -r .code)
-    if [ "X$code" = "X200" ]; then
-        changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
-        fika_redis HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
-        true
-    else
-        fika_log error "[hcs] POST $json ${rootUrl}/${apHcsPath}?ap_wallet=${kapWallet} fail"
-        false
-    fi
-}
-
 report_boss_hcs() {
     local cid hashed changed json tid
 
     cid=$1 && shift
-    hashed=$1 && shift
     tid=$1 && shift
 
-    [ "X$(fika_redis HGET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} | jq .sent)" = "Xtrue" ] && return
+    challenger=$(fika_redis HGET "${KEY_BOSS_HCS_CHALLENGERS}.${tid}" "${cid}")
+    if [ -z "$challenger" ]; then
+        fika_log debug "[hcs] No any challengers in this task-${tid}"
+        return
+    fi
 
-    raw="hcs_token=${tid}&ap_wallet=${kapWallet}&hash=${hashed}"
+    [ "X$(echo $challenger | jq .sent)" = "Xtrue" ] && return
 
-    response=$(curl -s -H "ACCESSTOKEN:${accessToken}" -H "ACCESSTOKEN-AP:${accesstokenAp}" -H 'Content-Type: text/plain' -X POST --data-raw $raw "${rootUrl}/${apHcsPath}")
-    fika_log debug "[hcs] curl -H \"ACCESSTOKEN:${accessToken}\" -H \"ACCESSTOKEN-AP:${accesstokenAp}\" -H 'Content-Type: text/plain' --data-raw $raw ${rootUrl}/${apHcsPath} => ${response}"
+    hashed=$(echo $challenger | jq -r .hashed)
 
-    code=$(echo $response | jq -r .code)
-    if [ "X$code" = "X200" ]; then
+    json=$(jq -rcM --null-input \
+        --arg wallet "${kdaemon_wallet_address}" \
+        --arg hash "$hashed" \
+        --arg token "$tid" \
+        '{ "ap_wallet": $wallet,"hash":$hash,"hcs_token":$token}')
+
+    if fika-manager boss post-ap-hcs "${json}"; then
         changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
         fika_redis HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
         true
@@ -90,9 +71,6 @@ report_boss_hcs() {
         false
     fi
 }
-
-# curl -s -H 'ACCESSTOKEN:ce18d7a0940719a00da82448b38c90b2' -X GET "https://oss-api.k36588.info/v0/ap/ap_token?ap_wallet=0x365962cd383a593975E743fD59Bbf2C1Bc141CF5"
-#{"ap_token":"02ec7a905b70689d9b30c6118fd1e62f","code":200}⏎ 
 
 post_main() {
     local cid tid
@@ -104,15 +82,7 @@ post_main() {
         && fika_log error "[hcs] not task for ${cid}" \
         && exit 127
 
-    challenger=$(fika_redis HGET "${KEY_BOSS_HCS_CHALLENGERS}.${tid}" "${cid}")
-    if [ -z "$challenger" ]; then
-        fika_log debug "[hcs] No any challengers in this task-${tid}"
-        exit 0
-    fi
-
-    hashed=$(echo $challenger | jq -r .hashed)
-
-    db_fetch && report_boss_hcs "$cid" "$hashed" "$tid"
+    report_boss_hcs "$cid" "$tid"
 }
 
 [ $# -gt 0 ] && post_main $@

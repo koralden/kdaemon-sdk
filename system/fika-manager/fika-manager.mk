@@ -10,15 +10,19 @@ FIKA_MANAGER_SITE_METHOD = local
 FIKA_MANAGER_LICENSE = Apache-2.0 or MIT
 FIKA_MANAGER_LICENSE_FILES = LICENSE-APACHE LICENSE-MIT
 
+#FIKA_MANAGER_CARGO_ENV = TARGET_CC=$(TARGET_CC) TARGET_AR=$(TARGET_AR) CARGO_CFG_TARGET_ARCH="aarch64" TARGET="aarch64-unknown-linux-musl" RUST_BACKTRACE=1
+
 define FIKA_MANAGER_BUILD_CMDS
-	cd $($(PKG)_SRCDIR) && \
-	$(TARGET_MAKE_ENV) \
-		$(TARGET_CONFIGURE_OPTS) \
-		$(PKG_CARGO_ENV) \
-		cargo build \
-			$(if $(BR2_ENABLE_DEBUG),,--release) \
-			--manifest-path Cargo.toml \
-			--locked
+          cd $($(PKG)_SRCDIR) && \
+          $(TARGET_MAKE_ENV) \
+                  $(TARGET_CONFIGURE_OPTS) \
+                  $(PKG_CARGO_ENV) \
+                  $($(2)_CARGO_ENV) \
+                  cargo build \
+                          $(if $(BR2_ENABLE_DEBUG),,--release) \
+                          --manifest-path Cargo.toml \
+                          --locked \
+                          $($(2)_CARGO_BUILD_OPTS)
 endef
 
 FIKA_MANAGER_MY_DIR=package/longdong/system/fika-manager/files

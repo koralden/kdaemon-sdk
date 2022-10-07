@@ -1,10 +1,12 @@
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
-use ethers::prelude::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{debug, error, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[cfg(feature = "ethers")]
+use ethers::prelude::*;
 
 use chrono::prelude::*;
 //use std::path::PathBuf;
@@ -78,7 +80,7 @@ pub struct GenerateOpt {
 }
 
 #[derive(Subcommand, Debug)]
-enum WalletCommand {
+pub enum WalletCommand {
     Generate(GenerateOpt),
     //Transact(TransactOpt),
     //Balance(BalanceOpt),
@@ -91,23 +93,19 @@ pub struct TimestampOpt {
 }
 
 #[derive(Args, Debug)]
-#[clap(about = "FIKA Misc Toolset")]
-pub struct MiscOpt {
+#[clap(about = "FIKA Time Toolset")]
+pub struct TimeToolOpt {
     #[clap(subcommand)]
-    commands: MiscCommand,
+    commands: TimeToolCommand,
 
     #[clap(short = 'l', long = "log-level", default_value = "info")]
     log_level: String,
 }
 
 #[derive(Subcommand, Debug)]
-enum MiscCommand {
+enum TimeToolCommand {
     Timestamp(TimestampOpt),
     Rfc3339,
-    Boss(CurlBossOpt),
-    Curl(CurlAnyOpt),
-    #[clap(subcommand)]
-    Wallet(WalletCommand),
 }
 
 #[instrument(name = "timestamp")]
@@ -124,12 +122,14 @@ async fn do_rfc3339() -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 #[instrument(name = "curl")]
 async fn do_curl(c: CurlAnyOpt) -> Result<()> {
     unimplemented!()
 }
 
-async fn do_boss(b: CurlBossOpt) -> Result<()> {
+#[cfg(feature = "boss-api")]
+pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
     let cfg = KdaemonConfig::build_from(&b.config).await?;
     let core = cfg.core;
     let boss = cfg.boss;
@@ -420,8 +420,9 @@ async fn do_boss(b: CurlBossOpt) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ethers")]
 #[instrument(name = "wallet")]
-async fn do_wallet(w: WalletCommand) -> Result<()> {
+pub async fn wallet_tools(w: WalletCommand) -> Result<()> {
     match w {
         WalletCommand::Generate(_cfg) => {
             let wallet = LocalWallet::new(&mut rand::thread_rng());
@@ -446,30 +447,20 @@ fn set_up_logging(log_level: &str) -> Result<() /*, MyError*/> {
 }
 
 //#[tokio::main]
-pub async fn misc(opt: MiscOpt) -> Result<()> {
+pub async fn time_tools(opt: TimeToolOpt) -> Result<()> {
     set_up_logging(&opt.log_level)?;
 
     match opt.commands {
-        MiscCommand::Timestamp(t) => {
+        TimeToolCommand::Timestamp(t) => {
             do_timestamp(t.timestamp).await?;
         }
-        MiscCommand::Rfc3339 => {
+        TimeToolCommand::Rfc3339 => {
             do_rfc3339().await?;
-        }
-        MiscCommand::Curl(c) => {
-            do_curl(c).await?;
-        }
-        MiscCommand::Boss(b) => {
-            do_boss(b).await?;
-        }
-        MiscCommand::Wallet(w) => {
-            do_wallet(w).await?;
         }
     }
 
     Ok(())
 }
-
 /*#[tokio::test]
 async fn test_toml_duration() {
     let cp = ConfigTask {

@@ -7,7 +7,11 @@ pub mod kap_daemon;
 pub mod recovery;
 pub use self::recovery::{recovery, RecoveryOpt};
 pub mod misc;
-pub use self::misc::{misc, MiscOpt};
+pub use self::misc::{time_tools, TimeToolOpt};
+#[cfg(feature = "boss-api")]
+pub use self::misc::{boss_tools, CurlBossOpt};
+#[cfg(feature = "ethers")]
+pub use self::misc::{wallet_tools, WalletCommand};
 pub mod daemon;
 pub use self::daemon::{daemon, DaemonOpt};
 pub mod publish_task;
