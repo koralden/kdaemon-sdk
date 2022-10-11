@@ -14,7 +14,7 @@ endpoint=${kdaemon_endpoint}
 latency=$(ping ${endpoint} -c3 -q | awk -F'/' '/^round-trip/ {print $4} /^rtt/ {print $5}')
 uptime=$(cat /proc/uptime  | awk '{print $1}')
 
-systime=$(fika-manager misc --rfc3339)
+systime=$(fika-manager time rfc3339)
 
 jq -rcM --null-input \
     --argjson uptime "$uptime" \

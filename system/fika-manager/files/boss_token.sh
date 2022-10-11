@@ -25,7 +25,7 @@ remove_expired_task() {
         [ -z "$item" ] && break
         tid=$(echo $item | jq -r .hcs_token)
         invalidT=$(echo $item | jq -r .invalid_time)
-        invalidS=$(fika-manager misc -s $invalidT)
+        invalidS=$(fika-manager time timestamp $invalidT)
 
         if [ $now -ge $invalidS ]; then
             for cc in $(fika_redis HKEYS ${KEY_BOSS_HCS_CHALLENGERS}.${tid}); do
