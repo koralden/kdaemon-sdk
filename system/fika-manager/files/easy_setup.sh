@@ -194,7 +194,7 @@ main() {
             wan_cb dhcp
         fi
         networkChg=true
-        update_kdaemon_toml wan_type "$type"
+        update_kdaemon_toml_no_dq wan_type $type
     fi
 
     if cmp_wlan "$cfg"; then

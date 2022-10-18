@@ -25,7 +25,7 @@ main() {
         fi
         code=200
         networkChg=true
-        update_kdaemon_toml state $state
+        update_kdaemon_toml_no_dq state $state
     else
         code=201
     fi
