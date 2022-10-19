@@ -626,10 +626,14 @@ async fn post_pairing(
     let msg = serde_json::to_string(&por).unwrap();
 
     if let Ok(orig) = server_ctx.get_por_cfg() {
-        if orig.nickname == por.nickname {
+        if orig == por {
             let resp = json!({"code": 200, "message": "do nothing"});
             return (StatusCode::OK, Json(resp)).into_response();
         }
+    }
+
+    if server_ctx.set_por_cfg(&por).is_err() {
+        error!("[internal] daemon-config update por fail");
     }
 
     let (code, message) = if let Ok(mut conn) = cache.get_async_connection().await {

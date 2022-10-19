@@ -45,12 +45,16 @@ main() {
     else
         fika_redis PUBLISH ${DbKey}.ack fail
     fi
-    $networkChg && sleep 3 && network_apply
 
     jq -rcM --null-input \
         --arg msg "$msg" \
         --argjson code $code \
         '{ "message": $msg, "code": $code }'
+
+    $networkChg && {
+        sleep 3
+        network_apply 2>&1 >/dev/null
+    }
 }
 
 main "$@"

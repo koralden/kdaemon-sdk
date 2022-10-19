@@ -96,6 +96,7 @@ wlan_guest_off() {
 
     uci batch << EOI
 delete network.kguest
+$(uci show network | awk 'BEGIN { FS=OFS="." } /kguest/ { if (map[$2] != 1) { print "delete network."$2; map[$2]=1 } }')
 delete wireless.kguest2
 delete wireless.kguest5
 del_list dhcp.@dnsmasq[0].interface="kguest"
