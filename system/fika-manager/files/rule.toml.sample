@@ -9,10 +9,10 @@ path = "/etc/fika_manager/boss_token.sh"
 [aws]
 [aws.provision]
 ca = "/etc/fika_manager/AmazonRootCA1.pem"
-cert = "/etc/fika_manager/bootstrap-inactive.certificate.pem"
-private = "/etc/fika_manager/bootstrap-inactive.private.key"
-template = "LongDongPreHookReal"
-thing_prefix = "LD2"
+cert = "/etc/fika_manager/bootstrap-sdk.certificate.pem"
+private = "/etc/fika_manager/bootstrap-sdk.private.key"
+template = "SdkFleetProvision"
+thing_prefix = "RPI"
 
 [aws.dedicated]
 pull_topic = [ "name/ap-info", "name/remote-manage", "name/honest-challenge", "name/pairing" ]
