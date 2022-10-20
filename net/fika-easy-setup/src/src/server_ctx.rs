@@ -28,7 +28,7 @@ use crate::{API_PATH_AUTH_SIMPLE, COOKIE_NAME};
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.5"
+    version = "0.0.6"
 )]
 pub struct Opt {
     /// set the listen addr
@@ -473,7 +473,7 @@ impl ServerCtx {
                         Ok(info)
                     }
                     Err(e) => {
-                        error!("call get_boss_api_info() fail - {e}");
+                        warn!("call get_boss_api_info() fail - {e}");
                         Err(e)
                     }
                 }

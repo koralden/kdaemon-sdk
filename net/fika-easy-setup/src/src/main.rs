@@ -10,10 +10,12 @@
 
 use anyhow::{anyhow, Result};
 use async_session::{MemoryStore, Session, SessionStore};
+#[cfg(not(feature = "pairing-only"))]
+use axum::extract::{ConnectInfo, Path, TypedHeader};
 use axum::{
     async_trait,
     extract::Form,
-    extract::{ConnectInfo, Extension, FromRequest, Path, Query, RequestParts, TypedHeader},
+    extract::{Extension, FromRequest, Query, RequestParts},
     http::{header::CONTENT_TYPE, header::SET_COOKIE, HeaderMap, StatusCode},
     response::Html,
     response::{IntoResponse, Redirect, Response},
@@ -35,16 +37,23 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::time::{self, Duration};
-use tracing::{debug, error, info};
+#[cfg(not(feature = "pairing-only"))]
+use tracing::info;
+use tracing::{debug, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+#[cfg(not(feature = "pairing-only"))]
 use fika_easy_setup::fas;
-use fika_easy_setup::kap_daemon::{KNetworkConfig, KPorConfig};
+#[cfg(not(feature = "pairing-only"))]
+use fika_easy_setup::kap_daemon::KNetworkConfig;
+use fika_easy_setup::kap_daemon::KPorConfig;
 use fika_easy_setup::server_ctx::{check_application_json, KAppOtp, Opt, ServerCtx, SessionUser};
+use fika_easy_setup::COOKIE_NAME;
+use fika_easy_setup::{API_PATH_AUTH_SIMPLE, API_PATH_PAIRING, API_PATH_PAIRING_STATUS};
+#[cfg(not(feature = "pairing-only"))]
 use fika_easy_setup::{
-    API_PATH_AUTH_SIMPLE, API_PATH_HONEST_CHALLENGE, API_PATH_LOGOUT, API_PATH_OPENNDS_FAS,
-    API_PATH_PAIRING, API_PATH_PAIRING_STATUS, API_PATH_POR_WIFI, API_PATH_SETUP_EASY,
-    API_PATH_SHOW_EMOJI, API_PATH_SYSTEM_CHECKING, COOKIE_NAME,
+    API_PATH_HONEST_CHALLENGE, API_PATH_LOGOUT, API_PATH_OPENNDS_FAS, API_PATH_POR_WIFI,
+    API_PATH_SETUP_EASY, API_PATH_SHOW_EMOJI, API_PATH_SYSTEM_CHECKING,
 };
 
 #[tokio::main]
@@ -63,6 +72,7 @@ async fn main() {
     let server_ctx = ServerCtx::build_from(&opt).await;
     let server_ctx = Arc::new(server_ctx);
 
+    #[cfg(not(feature = "pairing-only"))]
     let fas = tokio::spawn(fas::fas_service(
         opt.public_addr.clone(),
         opt.fas_port,
@@ -71,6 +81,7 @@ async fn main() {
         opt.auth_dir.clone(),
     ));
 
+    #[cfg(not(feature = "pairing-only"))]
     let http = tokio::spawn(public_service(
         opt.public_addr.clone(),
         opt.public_port,
@@ -81,7 +92,10 @@ async fn main() {
     ));
     let https = tokio::spawn(private_service(opt, server_ctx.clone()));
 
+    #[cfg(not(feature = "pairing-only"))]
     let _ = tokio::join!(https, http, fas);
+    #[cfg(feature = "pairing-only")]
+    let _ = tokio::join!(https);
 }
 
 async fn private_service(opt: Opt, server_ctx: Arc<ServerCtx>) {
@@ -91,6 +105,19 @@ async fn private_service(opt: Opt, server_ctx: Arc<ServerCtx>) {
     let redis_addr = format!("redis://{}/", opt.redis_addr);
     let cache = redis::Client::open(redis_addr).unwrap();
 
+    #[cfg(feature = "pairing-only")]
+    let app = Router::new()
+        .route("/", get(index))
+        .route(
+            API_PATH_AUTH_SIMPLE,
+            get(get_session_auth).post(post_session_auth),
+        )
+        .route(API_PATH_PAIRING, get(get_pairing).post(post_pairing))
+        .route(API_PATH_PAIRING_STATUS, get(get_pairing_status_private))
+        .layer(Extension(store))
+        .layer(Extension(cache))
+        .layer(Extension(server_ctx));
+    #[cfg(not(feature = "pairing-only"))]
     let app = Router::new()
         .route("/", get(index))
         .route(
@@ -109,11 +136,7 @@ async fn private_service(opt: Opt, server_ctx: Arc<ServerCtx>) {
         .route(API_PATH_POR_WIFI, get(por_wifi).post(por_wifi))
         .layer(Extension(store))
         .layer(Extension(cache))
-        .layer(Extension(server_ctx))
-        /*.merge(axum_extra::routing::SpaRouter::new(
-            "/__res__",
-            opt.static_dir,
-        ))*/;
+        .layer(Extension(server_ctx));
 
     let addr = SocketAddr::from((
         IpAddr::from_str(opt.private_addr.as_str()).unwrap_or(IpAddr::V6(Ipv6Addr::LOCALHOST)),
@@ -141,6 +164,7 @@ async fn private_service(opt: Opt, server_ctx: Arc<ServerCtx>) {
     }
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn public_service(
     public_addr: String,
     public_port: u16,
@@ -187,6 +211,7 @@ async fn public_service(
     }
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn logout(
     Extension(store): Extension<MemoryStore>,
     cookies: Option<TypedHeader<headers::Cookie>>,
@@ -213,6 +238,10 @@ async fn index(
         return Redirect::temporary(API_PATH_AUTH_SIMPLE).into_response();
     }
 
+    #[cfg(feature = "pairing-only")]
+    return Redirect::temporary(API_PATH_PAIRING).into_response();
+
+    #[cfg(not(feature = "pairing-only"))]
     match online::check(Some(3)).await {
         Ok(c) => {
             debug!("online check ok - {:?}", c);
@@ -334,6 +363,7 @@ where
     }
 }
 
+#[cfg(not(feature = "pairing-only"))]
 const EASY_SETUP_TEMP: &str = std::include_str!("../templates/easy_setup.html");
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -343,6 +373,7 @@ enum WanType {
     Wwan,
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn show_network_setup(
     user: Option<SessionUser>,
     Extension(server): Extension<Arc<ServerCtx>>,
@@ -358,6 +389,7 @@ async fn show_network_setup(
 }
 
 // Valid user session required. If there is none, redirect to the auth page
+#[cfg(not(feature = "pairing-only"))]
 async fn update_network_setup(
     user: Option<SessionUser>,
     Form(cfg): Form<KNetworkConfig>,
@@ -423,8 +455,10 @@ async fn update_network_setup(
     }
 }
 
+#[cfg(not(feature = "pairing-only"))]
 const RESULT_TEMP: &str = std::include_str!("../templates/result.html");
 
+#[cfg(not(feature = "pairing-only"))]
 async fn get_result_emoji(result: &str, emoji: &str) -> impl IntoResponse {
     match emojis::get_by_shortcode(emoji) {
         Some(image) => {
@@ -449,11 +483,15 @@ struct EmojiStr {
     code: String,
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn show_emoji(emoji: Option<Query<EmojiStr>>) -> impl IntoResponse {
     let Query(emoji) = emoji.unwrap_or_default();
     get_result_emoji(&emoji.code, &emoji.code).await
 }
 
+#[cfg(feature = "pairing-only")]
+const PAIRING_TEMP: &str = std::include_str!("../templates/pairing_only.html");
+#[cfg(not(feature = "pairing-only"))]
 const PAIRING_TEMP: &str = std::include_str!("../templates/pairing.html");
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -715,6 +753,7 @@ async fn get_pairing_status_private(
     get_pairing_status(status, Extension(cache), Extension(server_ctx)).await
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn get_pairing_status_public(
     Extension(cache): Extension<redis::Client>,
     Extension(server_ctx): Extension<Arc<ServerCtx>>,
@@ -757,8 +796,10 @@ struct BossHcsPair {
     invalid_time: DateTime<Utc>,
 }
 
+#[cfg(not(feature = "pairing-only"))]
 static KEY_BOSS_HCS_CHALLENGERS: &str = "boss.hcs.challengers";
 
+#[cfg(not(feature = "pairing-only"))]
 impl BossHcsPair {
     async fn get(conn: &mut redis::aio::Connection) -> Result<BossHcsPair> {
         let hcs_list = "boss.hcs.token.list";
@@ -824,6 +865,7 @@ impl BossHcsPair {
     }
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn honest_challenge(
     Path(challenger_id): Path<String>,
     Extension(cache): Extension<redis::Client>,
@@ -863,6 +905,7 @@ async fn honest_challenge(
     (StatusCode::OK, Json(challenge))
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn update_honest_challenge(
     Path(challenger_id): Path<String>,
     Json(hc_request): Json<HonestChallengeRequest>,
@@ -962,6 +1005,7 @@ impl SimpleAuth {
     }
 }*/
 
+#[cfg(not(feature = "pairing-only"))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[allow(dead_code)]
 struct SystemChecking {
@@ -969,6 +1013,7 @@ struct SystemChecking {
     message: String,
 }
 
+#[cfg(not(feature = "pairing-only"))]
 async fn system_checking(
     user: Option<SessionUser>,
     Extension(cache): Extension<redis::Client>,
@@ -996,12 +1041,14 @@ async fn system_checking(
         .into_response()
 }
 
+#[cfg(not(feature = "pairing-only"))]
 const POR_TEMP: &str = std::include_str!("../templates/por.html");
-
 static KEY_KAP_POR_CONFIG: &str = "kap.por.config";
+#[cfg(not(feature = "pairing-only"))]
 static KEY_KAP_SYSTEM_CONFIG: &str = "kap.system.config";
 
 // Valid user session required. If there is none, redirect to the auth page
+#[cfg(not(feature = "pairing-only"))]
 async fn por_wifi(
     user: Option<SessionUser>,
     payload: Option<Json<KPorConfig>>,
@@ -1074,7 +1121,9 @@ async fn por_wifi(
     }
 }
 
+#[cfg(not(feature = "pairing-only"))]
 const FAS_TEMP: &str = std::include_str!("../templates/opennds_fas.html");
+#[cfg(not(feature = "pairing-only"))]
 async fn public_opennds_fas(
     req: Option<Query<String>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
