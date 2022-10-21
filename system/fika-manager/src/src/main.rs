@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 
 use fika_manager::{daemon, DaemonOpt};
 use fika_manager::{time_tools, TimeToolOpt};
-use fika_manager::{recovery, RecoveryOpt};
+use fika_manager::{activate, ActivateOpt};
 #[cfg(feature = "boss-api")]
 use fika_manager::{boss_tools, CurlBossOpt};
 #[cfg(feature = "ethers")]
@@ -23,7 +23,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Daemon(DaemonOpt),
-    Recovery(RecoveryOpt),
+    Activate(ActivateOpt),
     Time(TimeToolOpt),
     #[cfg(feature = "boss-api")]
     Boss(CurlBossOpt),
@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Cli::parse();
     match args.command {
         Commands::Daemon(opt) => daemon(opt).await?,
-        Commands::Recovery(opt) => recovery(opt).await?,
+        Commands::Activate(opt) => activate(opt).await?,
         Commands::Time(opt) => time_tools(opt).await?,
         #[cfg(feature = "boss-api")]
         Commands::Boss(opt) => boss_tools(opt).await?,

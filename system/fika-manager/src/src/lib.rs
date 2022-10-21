@@ -4,8 +4,8 @@ use tracing::{debug, instrument};
 
 pub mod aws_iot;
 pub mod kap_daemon;
-pub mod recovery;
-pub use self::recovery::{recovery, RecoveryOpt};
+pub mod activate;
+pub use self::activate::{activate, ActivateOpt};
 pub mod misc;
 pub use self::misc::{time_tools, TimeToolOpt};
 #[cfg(feature = "boss-api")]
@@ -16,6 +16,7 @@ pub mod daemon;
 pub use self::daemon::{daemon, DaemonOpt};
 pub mod publish_task;
 pub mod subscribe_task;
+pub mod kap_rule;
 
 #[derive(Debug)]
 #[allow(dead_code)]

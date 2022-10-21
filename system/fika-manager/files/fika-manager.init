@@ -15,10 +15,9 @@ start() {
             tries=$(expr $tries + 1)
             printf "."
         done
-        if [ $(redis-cli --raw EXISTS "kap.recovery.done") -eq 0 ]; then
-            printf "Starting fika-manager recovery: "
-            umask 077
-            /usr/bin/fika-manager recovery && redis-cli SAVE
+        if ! fika-manager activate; then
+            printf "[kdaemon] activation FAIL";
+            exit 127
         fi
 	printf "Starting fika-manager: "
         # network setup need fika-manager ready

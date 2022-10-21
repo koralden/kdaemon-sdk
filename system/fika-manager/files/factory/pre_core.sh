@@ -6,17 +6,16 @@
     fika_log debug "[$0] cp /etc/fika-redis.conf.sample /etc/fika-redis.conf"
 
     cp /etc/fika-redis.conf.sample /etc/fika-redis.conf
-    sync;sync
 }
 
 [ -e /etc/fika_manager/rule.toml ] || {
     fika_log debug "[$0] cp /etc/fika_manager/rule.toml.sample /etc/fika_manager/rule.toml"
 
     cp /etc/fika_manager/rule.toml.sample /etc/fika_manager/rule.toml
-    sync;sync
 }
 
 [ -e $KDAEMON_TOML_PATH ] || {
+    [ -d $(dirname $KDAEMON_TOML_PATH) ] || mkdir -p $(dirname $KDAEMON_TOML_PATH)
     if [ -e /userdata/factory.toml ]; then
         fika_log debug "[$0] cp /userdata/factory.toml $KDAEMON_TOML_PATH"
         cp /userdata/factory.toml $KDAEMON_TOML_PATH
@@ -24,5 +23,5 @@
         fika_log debug "[$0] cp /etc/fika_manager/kdaemon.toml.sample $KDAEMON_TOML_PATH"
         cp /etc/fika_manager/kdaemon.toml.sample $KDAEMON_TOML_PATH
     fi
-    sync;sync
 }
+sync;sync

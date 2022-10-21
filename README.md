@@ -26,29 +26,22 @@ And then setup configurations:
     $ install -d /etc/fika_easy_setup
     $ cp -a longdong/net/fika-easy-setup/src/certs /etc/fika_easy_setup
     $ cp -a longdong/net/fika-easy-setup/src/templates /etc/fika_easy_setup
-    $ install -d /userdata
-    $ cp /etc/fika_manager/kdaemon.toml.sample kdaemon.toml
 
 Reestablish daemon configuation to match system.  
 **Make sure wan connection is OK before this operation**
 
-    $ fika-manager recovery
+    $ fika-manager activate
+
+Capture output and post to [community](https://discord.com/channels/975795016410755082/1030295373798985759).
+  
+Command will create related connecting certificate/private-key in /userdata automaticcally by default,
+but **INACTIVE** until confirm from community.
 
 # Usage
 ## Start-services
     
     $ fika-manager daemon
     $ fika-easy-setup -a {RPI-LAN-IP} --certificate /etc/fika_easy_setup/certs/cert.pem --private-key /etc/fika_easy_setup/certs/key.pem
-
-After daemon start first time, it will create **INACTIVE** connection certificate/private-key /userdata automaticcally by default,
-All IOT connection is broken until active key(#device-activation)
-
-## Device-Activation
-
-    $ fika-manager activation
-
-Capture its output and feedback to [community](https://discord.com/channels/975795016410755082/1030295373798985759).
-We will *ACTIVE* related certification in back-end.
 
 ## Pairing
 

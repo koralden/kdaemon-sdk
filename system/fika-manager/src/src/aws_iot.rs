@@ -42,21 +42,38 @@ pub struct RuleAwsIotDedicatedConfig {
     pub pull_topic: Option<Vec<String>>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-struct AwsIotKeyCertificate {
+pub struct AwsIotKeyCertificate {
     certificate_id: String,
     certificate_pem: String,
     private_key: String,
     certificate_ownership_token: String,
+    issue_time: Option<DateTime<Utc>>,
 }
 
 impl AwsIotKeyCertificate {
-    pub async fn save(&self, cert_path: String, private_path: String) -> Result<()> {
+    async fn save(&mut self, cert_path: String, private_path: String) -> Result<(String, DateTime<Utc>)> {
+        let now = Utc::now();
+        self.issue_time = Some(now);
+
         fs::write(&cert_path, &self.certificate_pem).await?;
         fs::write(&private_path, &self.private_key).await?;
-        Ok(())
+
+        let info_path = cert_path.replace(".pem", ".info");
+        let all = serde_json::to_string(self)?;
+        fs::write(&info_path, &all).await?;
+
+        Ok((self.certificate_id.clone(), now))
+    }
+
+    pub async fn reload(cert_path: &str) -> Result<(String, DateTime<Utc>)> {
+        let info_path = cert_path.replace(".pem", ".info");
+        let cfg = fs::read_to_string(&info_path).await?;
+
+        let cert = serde_json::from_str::<Self>(&cfg)?;
+        Ok((cert.certificate_id, cert.issue_time.unwrap()))
     }
 }
 
@@ -71,12 +88,11 @@ struct AwsIotThingResponse {
     thing_name: String,
 }
 
-#[instrument(name = "mqtt::provision", skip(_db_chan))]
+#[instrument(name = "mqtt::provision")]
 pub async fn mqtt_provision_task(
     cfg: &KdaemonConfig,
     provision: &RuleAwsIotProvisionConfig,
-    _db_chan: mpsc::Sender<DbCommand>,
-) -> Result<()> {
+) -> Result<(String, DateTime<Utc>)> {
     let cert_path = cfg.cmp.cert.clone();
     let private_path = cfg.cmp.private.clone();
     let serial_number = cfg.core.serial_number.clone().to_ascii_lowercase();
@@ -112,7 +128,9 @@ pub async fn mqtt_provision_task(
         let mut receiver = iot_core_client.get_receiver().await;
         let template = provision.template.clone();
 
-        let recv_thread: task::JoinHandle<Result<()>> = tokio::spawn(async move {
+        let recv_thread: task::JoinHandle<Result<(String, DateTime<Utc>)>> = tokio::spawn(async move {
+            let mut got_certificate: Option<AwsIotKeyCertificate> = None;
+
             loop {
                 match receiver.recv().await {
                     Ok(event) => match event {
@@ -120,8 +138,7 @@ pub async fn mqtt_provision_task(
                             "$aws/certificates/create/json/accepted" => {
                                 match serde_json::from_slice::<AwsIotKeyCertificate>(&p.payload) {
                                     Ok(g) => {
-                                        let _ =
-                                            g.save(cert_path.clone(), private_path.clone()).await;
+                                        got_certificate = Some(g.clone());
                                         let payload = json!({
                                                     "certificateOwnershipToken": g.certificate_ownership_token,
                                                     "parameters": {
@@ -158,7 +175,12 @@ pub async fn mqtt_provision_task(
                                     {
                                         Ok(t) => {
                                             debug!("topic-{} got {:?}", topic, t);
-                                            return Ok(());
+                                            if let Some(mut got_certificate) = got_certificate {
+                                                return got_certificate.save(cert_path.clone(), private_path.clone()).await;
+                                            } else {
+                                                error!("no production certificate");
+                                                return Err(anyhow!("no production certificate"));
+                                            }
                                         }
                                         Err(e) => {
                                             error!("serde/json[topic - {}] fail {:?}", topic, e);
@@ -228,17 +250,17 @@ pub async fn mqtt_provision_task(
         });
 
         match tokio::join!(recv_thread, listen_thread) {
-            (Ok(_), Ok(_)) => {
+            (Ok(cert_id), Ok(_)) => {
                 info!("provision listen/recv thread normal terminated");
-                Ok(())
+                cert_id
             }
             (Err(e), Ok(_)) => {
                 error!("provision recv thread abnormal terminated - {:?}", e);
                 Err(anyhow!(e))
             }
-            (Ok(_), Err(e)) => {
+            (Ok(cert_id), Err(e)) => {
                 error!("provision listen thread abnormal terminated - {:?}", e);
-                Ok(())
+                cert_id
             }
             (Err(e1), Err(e2)) => {
                 info!(
@@ -263,10 +285,9 @@ pub async fn mqtt_dedicated_create(
         tokio::sync::broadcast::Sender<rumqttc::Packet>,
     ),
 )> {
-    cmp.config_verify().await?;
+    //cmp.config_verify().await?;
 
-    let thing_name = cmp.thing.as_ref().unwrap();
-    let client_id = thing_name.clone();
+    let client_id = cmp.thing.clone();
     let aws = AWSIoTSettings::new(
         client_id,
         cmp.ca.clone(),
@@ -361,48 +382,45 @@ pub async fn mqtt_dedicated_start(
 #[instrument(name = "mqtt::dedicated", skip(aws_ipc_rx, db_chan))]
 pub async fn mqtt_dedicated_create_start(
     cfg: &KdaemonConfig,
-    dedicated: Option<&RuleAwsIotDedicatedConfig>,
+    dedicated: Option<RuleAwsIotDedicatedConfig>,
     mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
-) -> Result<()> {
-    if let Some(t) = cfg.cmp.thing.as_ref() {
-        let pull_topic = dedicated
-            .and_then(|d| d.pull_topic.clone())
-            .or_else(|| None);
-        let mut retry = 1;
+    ) -> Result<()> {
+    let thing = &cfg.cmp.thing;
+    let pull_topic = dedicated
+        .and_then(|d| d.pull_topic)
+        .or_else(|| None);
+    let mut retry = 1;
 
-        loop {
-            let thing_name = t.clone();
-            if let Ok(iot) = mqtt_dedicated_create(&cfg.cmp).await {
-                let ret = mqtt_dedicated_start(
-                    aws_ipc_rx,
-                    db_chan.clone(),
-                    subscribe_ipc_tx.clone(),
-                    thing_name,
-                    iot,
-                    pull_topic.clone(),
+    loop {
+        let thing_name = thing.clone();
+        if let Ok(iot) = mqtt_dedicated_create(&cfg.cmp).await {
+            let ret = mqtt_dedicated_start(
+                aws_ipc_rx,
+                db_chan.clone(),
+                subscribe_ipc_tx.clone(),
+                thing_name,
+                iot,
+                pull_topic.clone(),
                 )
                 .await;
-                aws_ipc_rx = ret.unwrap();
-            } else {
-                error!("mqtt dedicated create fail");
-            }
-
-            time::sleep(Duration::from_secs(retry * 30)).await;
-            warn!("mqtt dedicated restart - {}", retry);
-
-            retry = retry + 1;
-            if retry == 100 {
-                break;
-            }
+            aws_ipc_rx = ret.unwrap();
+        } else {
+            error!("mqtt dedicated create fail, activate??");
         }
-        error!("mqtt dedicated loop break");
 
-        Err(anyhow!("mqtt dedicated loop break"))
-    } else {
-        Err(anyhow!("mqtt dedicated create fail"))
+        time::sleep(Duration::from_secs(retry * 30)).await;
+        warn!("mqtt dedicated restart - {}", retry);
+
+        retry = retry + 1;
+        if retry == 100 {
+            break;
+        }
     }
+    error!("mqtt dedicated loop break");
+
+    Err(anyhow!("mqtt dedicated loop break"))
 }
 
 async fn mqtt_dedicated_handle_iot(

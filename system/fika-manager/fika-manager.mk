@@ -40,7 +40,7 @@ define FIKA_MANAGER_INSTALL_MISC
 		$(TARGET_DIR)/etc/init.d/fika-manager
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/rule.toml.sample $(TARGET_DIR)/etc/fika_manager/rule.toml
 	#$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/factory.toml.sample $(TARGET_DIR)/etc/fika_manager/factory.toml
-	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/recovery.toml.sample $(TARGET_DIR)/etc/fika_manager/recovery.toml
+	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/activate.toml.sample $(TARGET_DIR)/etc/fika_manager/activate.toml
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/kdaemon.toml.sample $(TARGET_DIR)/etc/fika_manager/kdaemon.toml.sample
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/bootstrap-inactive.certificate.pem $(TARGET_DIR)/etc/fika_manager/bootstrap-inactive.certificate.pem
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_MY_DIR)/bootstrap-inactive.private.key $(TARGET_DIR)/etc/fika_manager/bootstrap-inactive.private.key

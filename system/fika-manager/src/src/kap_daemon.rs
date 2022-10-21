@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::warn;
+//use tracing::warn;
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[allow(dead_code)]
@@ -30,7 +30,7 @@ pub struct KNetworkConfig {
     pub wan_type: u8,
     pub wan_username: Option<String>,
     pub wan_password: Option<String>,
-    pub wifi_ssid: String,
+    pub wifi_ssid: Option<String>,
     pub wifi_password: Option<String>,
     pub password_overwrite: Option<String>,
 }
@@ -56,13 +56,23 @@ pub struct KBossConfig {
     pub ap_access_token: Option<String>,
 }
 
+impl KBossConfig {
+    pub async fn config_verify(&self) -> Result<()> {
+        if self.ap_access_token.is_none() {
+            Err(anyhow!("ap-access-token invalid"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[allow(dead_code)]
 pub struct KCmpConfig {
     pub endpoint: String,
     pub port: u32,
 
-    pub thing: Option<String>,
+    pub thing: String,
     pub cert: String,
     pub private: String,
     pub ca: String,
@@ -73,17 +83,22 @@ impl KdaemonConfig {
         let cfg = fs::read_to_string(path).await?;
         toml::from_str(&cfg).or_else(|e| Err(anyhow!(e)))
     }
+
+    pub async fn config_verify(&self) -> Result<()> {
+        self.boss.config_verify().await?;
+        self.cmp.config_verify().await
+    }
 }
 
 impl KCmpConfig {
-    pub fn apply_thing_name(&mut self, name: Option<String>) -> Result<()> {
+    /*pub fn apply_thing_name(&mut self, name: Option<String>) -> Result<()> {
         if self.thing.is_none() {
             self.thing = name;
         } else {
             warn!("thing-name-{:?} have forced", self.thing.as_ref());
         }
         Ok(())
-    }
+    }*/
 
     pub async fn config_verify(&self) -> Result<()> {
         let file = fs::File::open(&self.cert).await?;
@@ -104,9 +119,9 @@ impl KCmpConfig {
             return Err(anyhow!("{} invalid", &self.ca));
         }
 
-        if self.thing.is_none() {
+        /*if self.thing.is_none() {
             return Err(anyhow!("{:?} invalid", self.thing));
-        }
+        }*/
 
         Ok(())
     }

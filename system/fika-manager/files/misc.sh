@@ -25,7 +25,7 @@ update_kdaemon_toml() {
     key=$1
     val=$(echo $2 | sed 's,",\\",g')
 
-    sed "s,^[\t #]*$key =.*$,$key = \"$val\",g" -i $KDAEMON_TOML_PATH && sync
+    sed "s,^[\t #]*$key\s*=.*$,$key = \"$val\",g" -i $KDAEMON_TOML_PATH && sync
 }
 
 # no double-quote
@@ -36,7 +36,7 @@ update_kdaemon_toml_no_dq() {
     #echo $val | grep -q -E "^[0-9]+$" && str=$val
     #echo $val | grep -q -i -E "(false)|(true)" && str=$val
 
-    sed "s,^#*$key.*$,$key = $val,g" -i $KDAEMON_TOML_PATH && sync
+    sed "s,^#*$key\s*=.*$,$key = $val,g" -i $KDAEMON_TOML_PATH && sync
 }
 
 #loop() {

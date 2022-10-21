@@ -22,8 +22,8 @@ config_load wireless
 config_get wifi_ssid ssid0 ssid "K-Private"
 config_get wifi_password ssid0 key "changeme"
 
-sed -e "s,^.*wan_username.*$,wan_username = \"$wan_username\"," \
-    -e "s,^.*wan_password.*$,wan_password = \"$wan_password\"," \
-    -e "s,^.*wifi_ssid.*$,wifi_ssid = \"$wifi_ssid\"," \
-    -e "s,^.*wifi_password.*$,wifi_password = \"$wifi_password\"," \
+sed -e "s,^[\t #]*wan_username.*$,wan_username = \"$wan_username\"," \
+    -e "s,^[\t #]*wan_password.*$,wan_password = \"$wan_password\"," \
+    -e "s,^[\t #]*wifi_ssid.*$,wifi_ssid = \"$wifi_ssid\"," \
+    -e "s,^[\t #]*wifi_password.*$,wifi_password = \"$wifi_password\"," \
     -i $KDAEMON_TOML_PATH

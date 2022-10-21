@@ -4,7 +4,6 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 //use tracing_futures::WithSubscriber;
 use std::sync::{Arc, Mutex};
-use tokio::fs;
 use tokio::signal;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tokio::time::{self, Duration, Instant};
@@ -21,16 +20,16 @@ use std::path::PathBuf;
 
 //use std::io;
 use crate::aws_iot::{
-    mqtt_dedicated_create, mqtt_dedicated_create_start, mqtt_dedicated_start, mqtt_ipc_post,
-    mqtt_ipc_register, mqtt_provision_task, AwsIotCmd,
+    mqtt_dedicated_create_start, mqtt_ipc_post,
+    mqtt_ipc_register, AwsIotCmd,
 };
-use crate::aws_iot::{RuleAwsIotDedicatedConfig, RuleAwsIotProvisionConfig};
 use crate::kap_daemon::KdaemonConfig;
 use crate::publish_task::{publish_main, spawn_task_run_path_publish, RuleConfigTask};
 use crate::subscribe_task::{
     subscribe_ipc_post, subscribe_ipc_register, subscribe_main, SubscribeCmd,
 };
 use crate::DbCommand;
+use crate::kap_rule::{RuleConfig};
 
 #[derive(Debug, Args)]
 #[clap(
@@ -48,52 +47,6 @@ pub struct DaemonOpt {
     rule: String,
     #[clap(long = "log-level", default_value = "info")]
     log_level: String,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[allow(dead_code)]
-struct RuleConfig {
-    core: RuleConfigCore,
-    subscribe: Option<Vec<RuleConfigSubscribe>>,
-    task: Option<Vec<RuleConfigTask>>,
-    honest: Option<RuleHonestConfig>,
-    aws: Option<RuleAwsIotConfig>,
-}
-
-impl RuleConfig {
-    pub async fn build_from(path: &str) -> Result<Self> {
-        let cfg = fs::read_to_string(path).await?;
-        toml::from_str(&cfg).or_else(|e| Err(anyhow!(e)))
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[allow(dead_code)]
-struct RuleConfigCore {
-    thirdparty: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[allow(dead_code)]
-struct RuleConfigSubscribe {
-    topic: String,
-    path: PathBuf,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[allow(dead_code)]
-struct RuleHonestConfig {
-    ok_cycle: Duration,
-    fail_cycle: Duration,
-    path: PathBuf,
-    disable: Option<bool>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[allow(dead_code)]
-struct RuleAwsIotConfig {
-    provision: Option<RuleAwsIotProvisionConfig>,
-    dedicated: Option<RuleAwsIotDedicatedConfig>,
 }
 
 #[derive(Debug)]
@@ -419,6 +372,7 @@ pub async fn daemon(opt: DaemonOpt) -> Result<(), MyError> {
     let rule: RuleConfig = RuleConfig::build_from(&opt.rule).await?;
     let cfg: KdaemonConfig = KdaemonConfig::build_from(&opt.config).await?;
     //debug!("cfg content as {:#?}", cfg);
+    cfg.config_verify().await?;
 
     let (chan_tx, chan_rx) = mpsc::channel::<DbCommand>(32);
     let (aws_ipc_tx, aws_ipc_rx) = mpsc::channel::<AwsIotCmd>(32);
@@ -557,7 +511,7 @@ async fn honest_task(
 
 #[instrument(name = "mqtt::task", skip_all)]
 async fn mqtt_task(
-    mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
+    aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
     shared: Arc<Mutex<State>>,
@@ -573,93 +527,23 @@ async fn mqtt_task(
     };
 
     if kcfg.is_none() {
-        error!("kdaemon config not satisfy");
+        error!("kdaemon/cmp config not satisfy");
         return;
     }
     let kcfg = kcfg.unwrap();
 
-    if let Some(rule) = rule {
-        match (rule.dedicated, rule.provision) {
-            (Some(dedicated), Some(provision)) => {
-                let cfg = &kcfg;
-                match mqtt_dedicated_create(&cfg.cmp).await {
-                    Err(e) => {
-                        error!("MQTT dedicated create fail - {:?}, run provsion?", e);
-                        match mqtt_provision_task(cfg, &provision, db_chan.clone()).await {
-                            Ok(_) => {
-                                let db_chan = db_chan.clone();
-                                if let Err(e) = mqtt_dedicated_create_start(
-                                    cfg,
-                                    Some(&dedicated),
-                                    aws_ipc_rx,
-                                    db_chan.clone(),
-                                    subscribe_ipc_tx.clone(),
-                                )
-                                .await
-                                {
-                                    error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
-                                }
-                            }
-                            Err(e) => {
-                                error!("MQTT provision function(from dedicated) not work - {:?}", e)
-                            }
-                        }
-                    }
-                    Ok(mut iot) => {
-                        debug!("MQTT dedicated create success, start it");
-                        let thing_name = cfg.cmp.thing.as_ref().unwrap();
-                        let mut retry = 1;
-                        loop {
-                            let ret = mqtt_dedicated_start(
-                                aws_ipc_rx,
-                                db_chan.clone(),
-                                subscribe_ipc_tx.clone(),
-                                thing_name.clone(),
-                                iot,
-                                dedicated.pull_topic.clone(),
-                            )
-                            .await;
-
-                            retry = retry + 1;
-                            if retry == 100 {
-                                break;
-                            }
-                            aws_ipc_rx = ret.unwrap();
-                            time::sleep(Duration::from_secs(retry * 30)).await;
-                            warn!("mqtt dedicated restart - {}", retry);
-                            iot = mqtt_dedicated_create(&cfg.cmp).await.unwrap();
-                        }
-                    }
-                }
-            }
-            (None, Some(provision)) => {
-                let cfg = &kcfg;
-                match mqtt_provision_task(cfg, &provision, db_chan.clone()).await {
-                    Ok(_) => {
-                        let db_chan = db_chan.clone();
-                        if let Err(e) = mqtt_dedicated_create_start(
-                            cfg,
-                            None,
-                            aws_ipc_rx,
-                            db_chan,
-                            subscribe_ipc_tx,
-                        )
-                        .await
-                        {
-                            error!(
-                                "MQTT 1nd dedicated function(from provision) not work - {:?}",
-                                e
-                            );
-                        }
-                    }
-                    Err(e) => error!("MQTT provision function not work - {:?}", e),
-                }
-            }
-            (_, _) => {
-                debug!("MQTT config not satisfy, omit");
-            }
-        }
+    let dedicated_rule = if let Some(rule) = rule {
+        rule.dedicated
     } else {
-        debug!("MQTT config lost, omit");
-    }
+        None
+    };
+
+    if let Err(e) = mqtt_dedicated_create_start(
+        &kcfg, dedicated_rule, aws_ipc_rx,
+        db_chan.clone(),
+        subscribe_ipc_tx.clone()).await
+        {
+            error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
+        }
+
 }

@@ -14,7 +14,7 @@ get_boss_eth_wallet() {
 
     if wallet=$(fika-manager boss get-ap-wallet "${data}"); then
         if [ -n "$wallet" ]; then
-            sed "s,^.*wallet_address.*$,wallet_address = \"$wallet\"," -i $KDAEMON_TOML_PATH
+            update_kdaemon_toml wallet_address "$wallet"
         fi
     else
         fika_log error "[kap][boss] GET ap-wallet fail"
@@ -30,7 +30,7 @@ get_boss_ap_token() {
         if [ -n "$token" ]; then
             fika_log info "kap.boss.ap.token as $token"
             fika_redis SET kap.boss.ap.token "$token"
-            sed "s,^.*ap_access_token.*$,ap_access_token = \"$token\"," -i $KDAEMON_TOML_PATH
+            update_kdaemon_toml ap_access_token "$token"
             return 0
         fi
     fi

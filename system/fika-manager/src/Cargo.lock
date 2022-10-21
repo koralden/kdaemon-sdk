@@ -997,6 +997,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "atty",
  "aws-iot-device-sdk-rust",
  "bytes 1.2.1",
  "chrono",

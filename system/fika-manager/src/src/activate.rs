@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use clap::Args;
 use redis::AsyncCommands;
@@ -6,26 +6,39 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::signal;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, warn, error, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::kap_daemon::{KBossConfig, KCmpConfig, KCoreConfig, KNetworkConfig, KPorConfig};
+use crate::kap_daemon::{KBossConfig, KNetworkConfig, KPorConfig};
+use crate::kap_daemon::{KdaemonConfig, KCmpConfig, KCoreConfig};
+use crate::kap_rule::{RuleConfig};
+use crate::aws_iot::{mqtt_provision_task, AwsIotKeyCertificate};
+use chrono::prelude::*;
+use atty::Stream;
 
-type DbConnection = redis::aio::Connection;
+//type DbConnection = redis::aio::Connection;
 
 #[derive(Args, Debug, Clone)]
-#[clap(about = "FIKA manager recovery with factory data")]
-pub struct RecoveryOpt {
+#[clap(about = "FIKA manager activate with factory data")]
+pub struct ActivateOpt {
     #[clap(
-        short = 'c',
-        long = "config",
-        default_value = "/etc/fika_manager/recovery.toml"
+        short = 'p',
+        long = "activate-rule",
+        default_value = "/etc/fika_manager/activate.toml"
     )]
-    config: String,
+    active: String,
     #[clap(short = 'l', long = "log-level", default_value = "info")]
     log_level: String,
     #[clap(short, long, action)]
     force: bool,
+    #[clap(short = 'c', long = "config", default_value = "/userdata/kdaemon.toml")]
+    config: String,
+    #[clap(
+        short = 'r',
+        long = "rule",
+        default_value = "/etc/fika_manager/rule.toml"
+    )]
+    rule: String,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -45,23 +58,25 @@ trait FactoryAction {
             let mut child = if let Some(key) = self.get_key() {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    //debug!("args as {}", args);
-                    Command::new(&post).arg(&args).arg(key).spawn()?
+                    Command::new(&post).arg(&args).arg(key).spawn()
+                        .map_err(|e| anyhow!("{post}/{args}/{key} run fail - {e}"))?
                 } else {
-                    Command::new(&post).arg(key).spawn()?
+                    Command::new(&post).arg(key).spawn()
+                        .map_err(|e| anyhow!("{post}/{key} run fail - {e}"))?
                 }
             } else {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    //debug!("args as {}", args);
-                    Command::new(&post).arg(&args).spawn()?
+                    Command::new(&post).arg(&args).spawn()
+                        .map_err(|e| anyhow!("{post}/{args} run fail - {e}"))?
                 } else {
-                    Command::new(&post).spawn()?
+                    Command::new(&post).spawn()
+                        .map_err(|e| anyhow!("{post} run fail - {e}"))?
                 }
             };
 
             let status = child.wait().await?;
-            info!("command {} run completed - {}", post, status);
+            debug!("command {} run completed - {}", post, status);
         }
 
         Ok(())
@@ -71,34 +86,46 @@ trait FactoryAction {
             let mut child = if let Some(key) = self.get_key() {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    //debug!("args as {}", args);
-                    Command::new(&pre).arg(&args).arg(key).spawn()?
+                    Command::new(&pre).arg(&args).arg(key).spawn()
+                        .map_err(|e| anyhow!("{pre}/{args}/{key} run fail - {e}"))?
                 } else {
-                    Command::new(&pre).arg(key).spawn()?
+                    Command::new(&pre).arg(key).spawn()
+                        .map_err(|e| anyhow!("{pre}/{key} run fail - {e}"))?
                 }
             } else {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    //debug!("args as {}", args);
-                    Command::new(&pre).arg(&args).spawn()?
+                    Command::new(&pre).arg(&args).spawn()
+                        .map_err(|e| anyhow!("{pre}/{args} run fail - {e}"))?
                 } else {
-                    Command::new(&pre).spawn()?
+                    Command::new(&pre).spawn()
+                        .map_err(|e| anyhow!("{pre} run fail - {e}"))?
                 }
             };
 
             let status = child.wait().await?;
-            info!("command {} run completed - {}", pre, status);
+            debug!("command {} run completed - {}", pre, status);
         }
 
         Ok(())
     }
 
-    async fn key_apply(&self, db_conn: &mut DbConnection) -> Result<()> {
+    async fn key_apply(&self) -> Result<()> {
+        let mut db_conn = redis::Client::open("redis://127.0.0.1:6379")
+            .map_err(|e| anyhow!("db/redis open fail - {e}"))?
+            .get_async_connection()
+            .await
+            .map_err(|e| anyhow!("db/redis async connect fail - {e}"))?;
+
         if let Some(key) = self.get_key() {
             if let Some(args) = self.get_cfg() {
                 //serde_json::to_string(&self.cfg)?;
                 debug!("args as {}", args);
-                db_conn.set(&key, &args).await?;
+                db_conn.set(&key, &args).await
+                .map_err(|e| anyhow!("db/redis set {key}/{args} fail - {e}"))?;
+
+                let key = format!("{}.done", key);
+                db_conn.incr(&key, 1).await?
             }
         }
 
@@ -109,26 +136,10 @@ trait FactoryAction {
     fn get_pre(&self) -> Option<&String>;
     fn get_cfg(&self) -> Option<String>;
 
-    async fn run(&self, db_conn: &mut DbConnection, force: bool) -> Result<()> {
-        let key = if let Some(key) = self.get_key() {
-            let key = format!("{}.done", key);
-            if force == false && db_conn.exists::<&str, bool>(&key).await? == true {
-                debug!("db key - {} exist without force", &key);
-                return Ok(());
-            }
-            Some(key)
-        } else {
-            None
-        };
-
+    async fn run(&self, _force: bool) -> Result<()> {
         _ = self.pre().await?;
-        _ = self.key_apply(db_conn).await?;
+        _ = self.key_apply().await;
         _ = self.post().await?;
-
-        if let Some(key) = key {
-            db_conn.incr(&key, 1).await?;
-            debug!("{} run done", &key);
-        }
 
         Ok(())
     }
@@ -274,28 +285,83 @@ impl FactoryAction for KapCmpConfig {
     }
 }
 
-#[instrument(name = "recovery", skip(cfg))]
-async fn main_task(cfg: KapFactory, force: bool) -> Result<()> {
-    debug!("cfg content as {:#?}", cfg);
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ActivateFeedback {
+    name: String, /* as thing-name */
+    id: String, /* wallet-address */
+    certificate: String,
+    issue_time: DateTime<Utc>,
+}
 
-    let mut db_conn = redis::Client::open("redis://127.0.0.1:6379")?
-        .get_async_connection()
-        .await?;
-    //let db_conn = Arc::new(Mutex::new(db_conn));
+#[instrument(name = "fleet-provision")]
+async fn iot_fleet_provision(
+    rule_path: &str,
+    config_path: &str,
+    force: bool
+) -> Result<ActivateFeedback> {
+    let rule: RuleConfig = RuleConfig::build_from(rule_path).await
+        .map_err(|e| anyhow!("rule-{rule_path} build-from fail - {e}"))?;
+    let cfg: KdaemonConfig = KdaemonConfig::build_from(config_path).await
+        .map_err(|e| anyhow!("config-{config_path} build-from fail - {e}"))?;
 
-    _ = cfg.core.run(&mut db_conn, force).await?;
-    _ = cfg.network.run(&mut db_conn, force).await?;
-    _ = cfg.por.run(&mut db_conn, force).await?;
-    _ = cfg.boss.run(&mut db_conn, force).await?;
-    _ = cfg.cmp.run(&mut db_conn, force).await?;
+    let cert = if cfg.cmp.config_verify().await.is_ok() && force == false {
+        debug!("MQTT provision use original one");
+        AwsIotKeyCertificate::reload(&cfg.cmp.cert).await?
+    } else {
+        let provision_rule = if let Some(aws) = rule.aws {
+            if aws.provision.is_none() {
+                error!("rule/aws/provision section invalid");
+                return Err(anyhow!("rule/aws/provision section invalid"));
+            }
+            aws.provision.unwrap()
+        } else {
+            error!("rule/aws section invalid");
+            return Err(anyhow!("rule/aws section invalid"));
+        };
 
-    db_conn.incr("kap.recovery.done", 1).await?;
+        mqtt_provision_task(&cfg, &provision_rule).await?
+    };
+
+    Ok(ActivateFeedback {
+        name: cfg.cmp.thing,
+        id: cfg.core.wallet_address,
+        certificate: cert.0,
+        issue_time: cert.1,
+    })
+}
+
+//#[instrument(name = "activate", skip(opt))]
+async fn main_task(opt: ActivateOpt) -> Result<()> {
+    let cfg = fs::read_to_string(&opt.active).await
+        .map_err(|e| anyhow!("{} open/read fail - {}", &opt.active, e))?;
+    let cfg: KapFactory = toml::from_str(&cfg)
+        .map_err(|e| anyhow!("{} invalid toml format - {}", &opt.active, e))?;
+    let force = opt.force;
+
+    debug!("active-rule content as {:#?}", cfg);
+
+    _ = cfg.core.run(force).await?;
+    _ = cfg.network.run(force).await?;
+    _ = cfg.por.run(force).await?;
+    _ = cfg.boss.run(force).await?;
+    _ = cfg.cmp.run(force).await?;
+
+    let feedback = iot_fleet_provision(&opt.rule, &opt.config, force).await?;
+    let feedback = serde_json::to_string(&feedback)?;
+
+    if atty::is(Stream::Stdout) {
+        println!("#################################################################");
+        println!("Activation code as {feedback}");
+        println!("#################################################################");
+    } else {
+        println!("{feedback}");
+    }
 
     Ok(())
 }
 
-pub type MyError = Box<dyn std::error::Error + Send + Sync>;
-fn set_up_logging(log_level: &str) -> Result<(), MyError> {
+//pub type MyError = Box<dyn std::error::Error + Send + Sync>;
+fn set_up_logging(log_level: &str) -> Result<()> {
     // See https://docs.rs/tracing for more info
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
@@ -309,28 +375,24 @@ fn set_up_logging(log_level: &str) -> Result<(), MyError> {
 }
 
 //#[tokio::main]
-pub async fn recovery(opt: RecoveryOpt) -> Result<(), MyError> {
-    //let opt = Opt::parse();
+pub async fn activate(opt: ActivateOpt) -> Result<()> {
     set_up_logging(&opt.log_level)?;
-    debug!("config as {}", opt.config);
+    debug!("activate-rule path as {}", opt.active);
 
-    let cfg = fs::read_to_string(opt.config).await?;
-    let cfg: KapFactory = toml::from_str(&cfg)?;
-    let force = opt.force;
-
-    let main_jhandle = tokio::spawn(main_task(cfg, force));
+    let main_jhandle = tokio::spawn(main_task(opt));
     let future_sig_c = signal::ctrl_c();
 
     tokio::select! {
         r = main_jhandle => {
-            info!("main-task exit due to {:?}", r);
+            let r = r?;
+            debug!("main-task exit due to {:?}", r);
+            r
         },
         _ = future_sig_c => {
-            info!("exit by catch signal-c");
+            warn!("exit by catch signal-c");
+            Ok(())
         },
     }
-
-    Ok(())
 }
 
 /*#[tokio::test]
