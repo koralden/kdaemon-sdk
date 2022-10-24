@@ -2,21 +2,21 @@ use anyhow::Result;
 use tokio::sync::{/*broadcast, Notify,*/ mpsc, oneshot};
 use tracing::{debug, instrument};
 
+pub mod activate;
 pub mod aws_iot;
 pub mod kap_daemon;
-pub mod activate;
 pub use self::activate::{activate, ActivateOpt};
 pub mod misc;
-pub use self::misc::{time_tools, TimeToolOpt};
 #[cfg(feature = "boss-api")]
 pub use self::misc::{boss_tools, CurlBossOpt};
+pub use self::misc::{time_tools, TimeToolOpt};
 #[cfg(feature = "ethers")]
 pub use self::misc::{wallet_tools, WalletCommand};
 pub mod daemon;
 pub use self::daemon::{daemon, DaemonOpt};
+pub mod kap_rule;
 pub mod publish_task;
 pub mod subscribe_task;
-pub mod kap_rule;
 
 #[derive(Debug)]
 #[allow(dead_code)]

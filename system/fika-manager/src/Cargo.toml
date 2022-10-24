@@ -38,3 +38,4 @@ aws-iot-device-sdk-rust = { path = "aws-iot-device-sdk-rust" }
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"], optional = true }
 ethers = { git = "https://github.com/gakonst/ethers-rs", optional = true }
 atty = "0.2.14"
+colored_json = "3.0.1"

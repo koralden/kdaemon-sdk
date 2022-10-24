@@ -6,15 +6,16 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::signal;
-use tracing::{debug, info, warn, error, instrument};
+use tracing::{debug, error, instrument, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::kap_daemon::{KBossConfig, KNetworkConfig, KPorConfig};
-use crate::kap_daemon::{KdaemonConfig, KCmpConfig, KCoreConfig};
-use crate::kap_rule::{RuleConfig};
 use crate::aws_iot::{mqtt_provision_task, AwsIotKeyCertificate};
-use chrono::prelude::*;
+use crate::kap_daemon::{KBossConfig, KNetworkConfig, KPorConfig};
+use crate::kap_daemon::{KCmpConfig, KCoreConfig, KdaemonConfig};
+use crate::kap_rule::RuleConfig;
 use atty::Stream;
+use chrono::prelude::*;
+use colored_json::to_colored_json_auto;
 
 //type DbConnection = redis::aio::Connection;
 
@@ -58,19 +59,27 @@ trait FactoryAction {
             let mut child = if let Some(key) = self.get_key() {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    Command::new(&post).arg(&args).arg(key).spawn()
+                    Command::new(&post)
+                        .arg(&args)
+                        .arg(key)
+                        .spawn()
                         .map_err(|e| anyhow!("{post}/{args}/{key} run fail - {e}"))?
                 } else {
-                    Command::new(&post).arg(key).spawn()
+                    Command::new(&post)
+                        .arg(key)
+                        .spawn()
                         .map_err(|e| anyhow!("{post}/{key} run fail - {e}"))?
                 }
             } else {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    Command::new(&post).arg(&args).spawn()
+                    Command::new(&post)
+                        .arg(&args)
+                        .spawn()
                         .map_err(|e| anyhow!("{post}/{args} run fail - {e}"))?
                 } else {
-                    Command::new(&post).spawn()
+                    Command::new(&post)
+                        .spawn()
                         .map_err(|e| anyhow!("{post} run fail - {e}"))?
                 }
             };
@@ -86,19 +95,27 @@ trait FactoryAction {
             let mut child = if let Some(key) = self.get_key() {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    Command::new(&pre).arg(&args).arg(key).spawn()
+                    Command::new(&pre)
+                        .arg(&args)
+                        .arg(key)
+                        .spawn()
                         .map_err(|e| anyhow!("{pre}/{args}/{key} run fail - {e}"))?
                 } else {
-                    Command::new(&pre).arg(key).spawn()
+                    Command::new(&pre)
+                        .arg(key)
+                        .spawn()
                         .map_err(|e| anyhow!("{pre}/{key} run fail - {e}"))?
                 }
             } else {
                 if let Some(cfg) = self.get_cfg() {
                     let args = serde_json::to_string(&cfg)?;
-                    Command::new(&pre).arg(&args).spawn()
+                    Command::new(&pre)
+                        .arg(&args)
+                        .spawn()
                         .map_err(|e| anyhow!("{pre}/{args} run fail - {e}"))?
                 } else {
-                    Command::new(&pre).spawn()
+                    Command::new(&pre)
+                        .spawn()
                         .map_err(|e| anyhow!("{pre} run fail - {e}"))?
                 }
             };
@@ -121,8 +138,10 @@ trait FactoryAction {
             if let Some(args) = self.get_cfg() {
                 //serde_json::to_string(&self.cfg)?;
                 debug!("args as {}", args);
-                db_conn.set(&key, &args).await
-                .map_err(|e| anyhow!("db/redis set {key}/{args} fail - {e}"))?;
+                db_conn
+                    .set(&key, &args)
+                    .await
+                    .map_err(|e| anyhow!("db/redis set {key}/{args} fail - {e}"))?;
 
                 let key = format!("{}.done", key);
                 db_conn.incr(&key, 1).await?
@@ -286,9 +305,9 @@ impl FactoryAction for KapCmpConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct ActivateFeedback {
+struct ActivateCertificate {
     name: String, /* as thing-name */
-    id: String, /* wallet-address */
+    id: String,   /* wallet-address */
     certificate: String,
     issue_time: DateTime<Utc>,
 }
@@ -297,11 +316,13 @@ struct ActivateFeedback {
 async fn iot_fleet_provision(
     rule_path: &str,
     config_path: &str,
-    force: bool
-) -> Result<ActivateFeedback> {
-    let rule: RuleConfig = RuleConfig::build_from(rule_path).await
+    force: bool,
+) -> Result<ActivateCertificate> {
+    let rule: RuleConfig = RuleConfig::build_from(rule_path)
+        .await
         .map_err(|e| anyhow!("rule-{rule_path} build-from fail - {e}"))?;
-    let cfg: KdaemonConfig = KdaemonConfig::build_from(config_path).await
+    let cfg: KdaemonConfig = KdaemonConfig::build_from(config_path)
+        .await
         .map_err(|e| anyhow!("config-{config_path} build-from fail - {e}"))?;
 
     let cert = if cfg.cmp.config_verify().await.is_ok() && force == false {
@@ -322,7 +343,7 @@ async fn iot_fleet_provision(
         mqtt_provision_task(&cfg, &provision_rule).await?
     };
 
-    Ok(ActivateFeedback {
+    Ok(ActivateCertificate {
         name: cfg.cmp.thing,
         id: cfg.core.wallet_address,
         certificate: cert.0,
@@ -332,10 +353,11 @@ async fn iot_fleet_provision(
 
 //#[instrument(name = "activate", skip(opt))]
 async fn main_task(opt: ActivateOpt) -> Result<()> {
-    let cfg = fs::read_to_string(&opt.active).await
+    let cfg = fs::read_to_string(&opt.active)
+        .await
         .map_err(|e| anyhow!("{} open/read fail - {}", &opt.active, e))?;
-    let cfg: KapFactory = toml::from_str(&cfg)
-        .map_err(|e| anyhow!("{} invalid toml format - {}", &opt.active, e))?;
+    let cfg: KapFactory =
+        toml::from_str(&cfg).map_err(|e| anyhow!("{} invalid toml format - {}", &opt.active, e))?;
     let force = opt.force;
 
     debug!("active-rule content as {:#?}", cfg);
@@ -346,13 +368,18 @@ async fn main_task(opt: ActivateOpt) -> Result<()> {
     _ = cfg.boss.run(force).await?;
     _ = cfg.cmp.run(force).await?;
 
-    let feedback = iot_fleet_provision(&opt.rule, &opt.config, force).await?;
-    let feedback = serde_json::to_string(&feedback)?;
+    let cert = iot_fleet_provision(&opt.rule, &opt.config, force).await?;
+    let feedback = serde_json::to_string(&cert)?;
 
     if atty::is(Stream::Stdout) {
-        println!("#################################################################");
-        println!("Activation code as {feedback}");
-        println!("#################################################################");
+        println!(
+            "################################# [Activation code] #################################"
+        );
+        let color = to_colored_json_auto(&serde_json::from_str::<serde_json::Value>(&feedback)?)?;
+        println!("{}", color);
+        println!(
+            "#####################################################################################"
+        );
     } else {
         println!("{feedback}");
     }

@@ -19,17 +19,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 //use std::io;
-use crate::aws_iot::{
-    mqtt_dedicated_create_start, mqtt_ipc_post,
-    mqtt_ipc_register, AwsIotCmd,
-};
+use crate::aws_iot::{mqtt_dedicated_create_start, mqtt_ipc_post, mqtt_ipc_register, AwsIotCmd};
 use crate::kap_daemon::KdaemonConfig;
+use crate::kap_rule::RuleConfig;
 use crate::publish_task::{publish_main, spawn_task_run_path_publish, RuleConfigTask};
 use crate::subscribe_task::{
     subscribe_ipc_post, subscribe_ipc_register, subscribe_main, SubscribeCmd,
 };
 use crate::DbCommand;
-use crate::kap_rule::{RuleConfig};
 
 #[derive(Debug, Args)]
 #[clap(
@@ -539,11 +536,17 @@ async fn mqtt_task(
     };
 
     if let Err(e) = mqtt_dedicated_create_start(
-        &kcfg, dedicated_rule, aws_ipc_rx,
+        &kcfg,
+        dedicated_rule,
+        aws_ipc_rx,
         db_chan.clone(),
-        subscribe_ipc_tx.clone()).await
-        {
-            error!("MQTT 2nd dedicated function(from provision) not work - {:?}", e);
-        }
-
+        subscribe_ipc_tx.clone(),
+    )
+    .await
+    {
+        error!(
+            "MQTT 2nd dedicated function(from provision) not work - {:?}",
+            e
+        );
+    }
 }

@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
-use tokio::time:: Duration;
-use tokio::fs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tokio::fs;
+use tokio::time::Duration;
 
 use crate::aws_iot::{RuleAwsIotDedicatedConfig, RuleAwsIotProvisionConfig};
 use crate::publish_task::RuleConfigTask;
@@ -52,4 +52,3 @@ pub struct RuleAwsIotConfig {
     pub provision: Option<RuleAwsIotProvisionConfig>,
     pub dedicated: Option<RuleAwsIotDedicatedConfig>,
 }
-

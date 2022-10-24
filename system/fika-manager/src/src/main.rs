@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use fika_manager::{daemon, DaemonOpt};
-use fika_manager::{time_tools, TimeToolOpt};
 use fika_manager::{activate, ActivateOpt};
 #[cfg(feature = "boss-api")]
 use fika_manager::{boss_tools, CurlBossOpt};
+use fika_manager::{daemon, DaemonOpt};
+use fika_manager::{time_tools, TimeToolOpt};
 #[cfg(feature = "ethers")]
 use fika_manager::{wallet_tools, WalletCommand};
 

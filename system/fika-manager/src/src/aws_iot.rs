@@ -54,7 +54,11 @@ pub struct AwsIotKeyCertificate {
 }
 
 impl AwsIotKeyCertificate {
-    async fn save(&mut self, cert_path: String, private_path: String) -> Result<(String, DateTime<Utc>)> {
+    async fn save(
+        &mut self,
+        cert_path: String,
+        private_path: String,
+    ) -> Result<(String, DateTime<Utc>)> {
         let now = Utc::now();
         self.issue_time = Some(now);
 
@@ -128,18 +132,20 @@ pub async fn mqtt_provision_task(
         let mut receiver = iot_core_client.get_receiver().await;
         let template = provision.template.clone();
 
-        let recv_thread: task::JoinHandle<Result<(String, DateTime<Utc>)>> = tokio::spawn(async move {
-            let mut got_certificate: Option<AwsIotKeyCertificate> = None;
+        let recv_thread: task::JoinHandle<Result<(String, DateTime<Utc>)>> = tokio::spawn(
+            async move {
+                let mut got_certificate: Option<AwsIotKeyCertificate> = None;
 
-            loop {
-                match receiver.recv().await {
-                    Ok(event) => match event {
-                        Packet::Publish(p) => match p.topic.as_str() {
-                            "$aws/certificates/create/json/accepted" => {
-                                match serde_json::from_slice::<AwsIotKeyCertificate>(&p.payload) {
-                                    Ok(g) => {
-                                        got_certificate = Some(g.clone());
-                                        let payload = json!({
+                loop {
+                    match receiver.recv().await {
+                        Ok(event) => match event {
+                            Packet::Publish(p) => match p.topic.as_str() {
+                                "$aws/certificates/create/json/accepted" => {
+                                    match serde_json::from_slice::<AwsIotKeyCertificate>(&p.payload)
+                                    {
+                                        Ok(g) => {
+                                            got_certificate = Some(g.clone());
+                                            let payload = json!({
                                                     "certificateOwnershipToken": g.certificate_ownership_token,
                                                     "parameters": {
                                                         "Model": model,
@@ -148,99 +154,114 @@ pub async fn mqtt_provision_task(
                                                         "DeviceLocation": sku,
                                                     }
                                                 }).to_string();
-                                        let topic = format!(
-                                            "$aws/provisioning-templates/{}/provision/json",
-                                            &template
-                                        );
-                                        iot_core_client
-                                            .publish(topic, QoS::AtLeastOnce, payload)
-                                            .await
-                                            .unwrap();
-                                    }
-                                    Err(e) => {
-                                        error!("serde/json fail {:?}", e);
-                                    }
-                                }
-                            }
-                            _ => {
-                                let topic = format!(
-                                    "$aws/provisioning-templates/{}/provision/json/accepted",
-                                    &template
-                                );
-                                if topic == p.topic {
-                                    let r = iot_core_client.get_client().await.disconnect().await;
-                                    debug!("mqtt provision client disconnect - {:?}", r);
-
-                                    match serde_json::from_slice::<AwsIotThingResponse>(&p.payload)
-                                    {
-                                        Ok(t) => {
-                                            debug!("topic-{} got {:?}", topic, t);
-                                            if let Some(mut got_certificate) = got_certificate {
-                                                return got_certificate.save(cert_path.clone(), private_path.clone()).await;
-                                            } else {
-                                                error!("no production certificate");
-                                                return Err(anyhow!("no production certificate"));
-                                            }
+                                            let topic = format!(
+                                                "$aws/provisioning-templates/{}/provision/json",
+                                                &template
+                                            );
+                                            iot_core_client
+                                                .publish(topic, QoS::AtLeastOnce, payload)
+                                                .await
+                                                .unwrap();
                                         }
                                         Err(e) => {
-                                            error!("serde/json[topic - {}] fail {:?}", topic, e);
-                                            return Err(anyhow!("RegisterThing response invalid"));
+                                            error!("serde/json fail {:?}", e);
                                         }
                                     }
-                                } else {
-                                    println!(
-                                        "Received message {:?} on topic: {}",
-                                        p.payload, p.topic
-                                    );
                                 }
-                            }
-                        },
-                        Packet::SubAck(s) => match s.pkid {
-                            1 => iot_core_client
-                                .subscribe(
-                                    "$aws/certificates/create/json/rejected".to_string(),
-                                    QoS::AtLeastOnce,
-                                )
-                                .await
-                                .unwrap(),
-                            2 => iot_core_client
-                                .subscribe(
-                                    format!(
+                                _ => {
+                                    let topic = format!(
+                                        "$aws/provisioning-templates/{}/provision/json/accepted",
+                                        &template
+                                    );
+                                    if topic == p.topic {
+                                        let r =
+                                            iot_core_client.get_client().await.disconnect().await;
+                                        debug!("mqtt provision client disconnect - {:?}", r);
+
+                                        match serde_json::from_slice::<AwsIotThingResponse>(
+                                            &p.payload,
+                                        ) {
+                                            Ok(t) => {
+                                                debug!("topic-{} got {:?}", topic, t);
+                                                if let Some(mut got_certificate) = got_certificate {
+                                                    return got_certificate
+                                                        .save(
+                                                            cert_path.clone(),
+                                                            private_path.clone(),
+                                                        )
+                                                        .await;
+                                                } else {
+                                                    error!("no production certificate");
+                                                    return Err(anyhow!(
+                                                        "no production certificate"
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "serde/json[topic - {}] fail {:?}",
+                                                    topic, e
+                                                );
+                                                return Err(anyhow!(
+                                                    "RegisterThing response invalid"
+                                                ));
+                                            }
+                                        }
+                                    } else {
+                                        println!(
+                                            "Received message {:?} on topic: {}",
+                                            p.payload, p.topic
+                                        );
+                                    }
+                                }
+                            },
+                            Packet::SubAck(s) => match s.pkid {
+                                1 => iot_core_client
+                                    .subscribe(
+                                        "$aws/certificates/create/json/rejected".to_string(),
+                                        QoS::AtLeastOnce,
+                                    )
+                                    .await
+                                    .unwrap(),
+                                2 => iot_core_client
+                                    .subscribe(
+                                        format!(
                                         "$aws/provisioning-templates/{}/provision/json/accepted",
                                         &template
                                     ),
-                                    QoS::AtLeastOnce,
-                                )
-                                .await
-                                .unwrap(),
-                            3 => iot_core_client
-                                .subscribe(
-                                    format!(
+                                        QoS::AtLeastOnce,
+                                    )
+                                    .await
+                                    .unwrap(),
+                                3 => iot_core_client
+                                    .subscribe(
+                                        format!(
                                         "$aws/provisioning-templates/{}/provision/json/rejected",
                                         &template
                                     ),
-                                    QoS::AtLeastOnce,
-                                )
-                                .await
-                                .unwrap(),
-                            _ => {
-                                debug!("final subscribe response {:?}", s);
-                                iot_core_client
-                                    .publish(
-                                        "$aws/certificates/create/json".to_string(),
                                         QoS::AtLeastOnce,
-                                        "",
                                     )
                                     .await
-                                    .unwrap();
-                            }
+                                    .unwrap(),
+                                _ => {
+                                    debug!("final subscribe response {:?}", s);
+                                    iot_core_client
+                                        .publish(
+                                            "$aws/certificates/create/json".to_string(),
+                                            QoS::AtLeastOnce,
+                                            "",
+                                        )
+                                        .await
+                                        .unwrap();
+                                }
+                            },
+                            _ => debug!("Got event on receiver: {:?}", event),
                         },
-                        _ => debug!("Got event on receiver: {:?}", event),
-                    },
-                    Err(_) => (),
+                        Err(_) => (),
+                    }
                 }
-            }
-        });
+            },
+        );
         let listen_thread: task::JoinHandle<Result<()>> = tokio::spawn(async move {
             let r = async_event_loop_listener(eventloop_stuff).await;
             if r.is_err() {
@@ -386,11 +407,9 @@ pub async fn mqtt_dedicated_create_start(
     mut aws_ipc_rx: mpsc::Receiver<AwsIotCmd>,
     db_chan: mpsc::Sender<DbCommand>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
-    ) -> Result<()> {
+) -> Result<()> {
     let thing = &cfg.cmp.thing;
-    let pull_topic = dedicated
-        .and_then(|d| d.pull_topic)
-        .or_else(|| None);
+    let pull_topic = dedicated.and_then(|d| d.pull_topic).or_else(|| None);
     let mut retry = 1;
 
     loop {
@@ -403,8 +422,8 @@ pub async fn mqtt_dedicated_create_start(
                 thing_name,
                 iot,
                 pull_topic.clone(),
-                )
-                .await;
+            )
+            .await;
             aws_ipc_rx = ret.unwrap();
         } else {
             error!("mqtt dedicated create fail, activate??");
