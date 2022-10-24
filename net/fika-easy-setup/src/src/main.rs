@@ -81,13 +81,18 @@ async fn main() {
         opt.auth_dir.clone(),
     ));
 
+    let (cert, key) = if opt.no_tls {
+        (None, None)
+    } else {
+        (Some(opt.certificate.clone()), Some(opt.private_key.clone()))
+    };
+
     #[cfg(not(feature = "pairing-only"))]
     let http = tokio::spawn(public_service(
         opt.public_addr.clone(),
         opt.public_port,
         opt.redis_addr.clone(),
-        opt.certificate.clone(),
-        opt.private_key.clone(),
+        cert, key,
         server_ctx.clone(),
     ));
     let https = tokio::spawn(private_service(opt, server_ctx.clone()));
@@ -143,24 +148,22 @@ async fn private_service(opt: Opt, server_ctx: Arc<ServerCtx>) {
         opt.private_port,
     ));
 
-    match (opt.certificate, opt.private_key) {
-        (Some(ref cert), Some(ref pkey)) => {
-            let config = RustlsConfig::from_pem_file(cert, pkey).await.unwrap();
+    if opt.no_tls {
+        tracing::info!("listening on http://{} for private", addr);
+        axum::Server::bind(&addr)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    } else {
+        let config = RustlsConfig::from_pem_file(opt.certificate, opt.private_key)
+            .await.unwrap();
 
-            tracing::info!("listening on https://{} for private", addr);
+        tracing::info!("listening on https://{} for private", addr);
 
-            axum_server::bind_rustls(addr, config)
-                .serve(app.into_make_service())
-                .await
-                .unwrap();
-        }
-        (_, _) => {
-            tracing::info!("listening on http://{} for private", addr);
-            axum::Server::bind(&addr)
-                .serve(app.into_make_service())
-                .await
-                .unwrap();
-        }
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
     }
 }
 

@@ -64,10 +64,12 @@ pub struct Opt {
     #[clap(long = "static-dir", default_value = "../templates")]
     pub static_dir: String,
 
-    #[clap(long = "certificate")]
-    pub certificate: Option<String>,
-    #[clap(long = "private-key")]
-    pub private_key: Option<String>,
+    #[clap(long = "no-tls")]
+    pub no_tls: bool,
+    #[clap(long = "certificate", default_value = "/etc/fika_easy_setup/certs/cert.pem")]
+    pub certificate: String,
+    #[clap(long = "private-key", default_value = "/etc/fika_easy_setup/certs/key.pem")]
+    pub private_key: String,
 
     #[clap(long = "access-token")]
     pub access_token: Option<String>,
