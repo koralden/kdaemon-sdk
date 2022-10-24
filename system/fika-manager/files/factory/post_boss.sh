@@ -7,7 +7,7 @@ get_boss_eth_wallet() {
     local data
 
     data=$(jq -rcM --null-input \
-        --arg who "$kdaemon_nickname" \
+        --arg who "$kdaemon_mac_address" \
         --arg where "nowhere" \
         --arg comment "activate" \
         '{ "who": $who, "where": $where, "comment": $comment }')
@@ -29,7 +29,6 @@ get_boss_ap_token() {
     if token=$(fika-manager boss -w ${walletAddress} get-ap-token); then
         if [ -n "$token" ]; then
             fika_log info "kap.boss.ap.token as $token"
-            fika_redis SET kap.boss.ap.token "$token"
             update_kdaemon_toml ap_access_token "$token"
             return 0
         fi

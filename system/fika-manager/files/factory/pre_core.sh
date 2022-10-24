@@ -3,14 +3,14 @@
 . /etc/fika_manager/misc.sh
 
 [ -e /etc/fika-redis.conf ] || {
-    fika_log debug "[$0] cp /etc/fika-redis.conf.sample /etc/fika-redis.conf"
-
-    cp /etc/fika-redis.conf.sample /etc/fika-redis.conf
+    if [ -e /etc/fika-redis.conf.sample ]; then
+        fika_log debug "[$0] cp /etc/fika-redis.conf.sample /etc/fika-redis.conf"
+        cp /etc/fika-redis.conf.sample /etc/fika-redis.conf
+    fi
 }
 
 [ -e /etc/fika_manager/rule.toml ] || {
     fika_log debug "[$0] cp /etc/fika_manager/rule.toml.sample /etc/fika_manager/rule.toml"
-
     cp /etc/fika_manager/rule.toml.sample /etc/fika_manager/rule.toml
 }
 
