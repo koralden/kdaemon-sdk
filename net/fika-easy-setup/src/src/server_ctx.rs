@@ -28,7 +28,7 @@ use crate::{API_PATH_AUTH_SIMPLE, COOKIE_NAME};
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.6"
+    version = "0.0.7"
 )]
 pub struct Opt {
     /// set the listen addr

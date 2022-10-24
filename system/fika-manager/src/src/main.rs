@@ -13,7 +13,7 @@ use fika_manager::{wallet_tools, WalletCommand};
 #[clap(
     name = "fika-manager",
     about = "FIKA manager to interactive with platform",
-    version = "0.0.6"
+    version = "0.0.7"
 )]
 struct Cli {
     #[clap(subcommand)]
