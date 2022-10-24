@@ -6,7 +6,7 @@ use fika_manager::{activate, ActivateOpt};
 use fika_manager::{boss_tools, CurlBossOpt};
 use fika_manager::{daemon, DaemonOpt};
 use fika_manager::{time_tools, TimeToolOpt};
-#[cfg(feature = "ethers")]
+#[cfg(feature = "wallet")]
 use fika_manager::{wallet_tools, WalletCommand};
 
 #[derive(Parser, Debug)]
@@ -27,7 +27,7 @@ enum Commands {
     Time(TimeToolOpt),
     #[cfg(feature = "boss-api")]
     Boss(CurlBossOpt),
-    #[cfg(feature = "ethers")]
+    #[cfg(feature = "wallet")]
     #[clap(subcommand)]
     Wallet(WalletCommand),
 }
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Commands::Time(opt) => time_tools(opt).await?,
         #[cfg(feature = "boss-api")]
         Commands::Boss(opt) => boss_tools(opt).await?,
-        #[cfg(feature = "ethers")]
+        #[cfg(feature = "wallet")]
         Commands::Wallet(opt) => wallet_tools(opt).await?,
     }
 

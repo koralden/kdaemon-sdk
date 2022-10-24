@@ -16,12 +16,22 @@ pub struct KdaemonConfig {
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[allow(dead_code)]
 pub struct KCoreConfig {
-    pub wallet_address: String,
+    pub wallet_address: Option<String>,
     pub mac_address: String,
     pub serial_number: String,
     pub sku: String,
     pub database: String,
     pub user_wallet: Option<String>,
+}
+
+impl KCoreConfig {
+    pub async fn config_verify(&self) -> Result<()> {
+        if self.wallet_address.is_none() {
+            Err(anyhow!("ap-wallet-address invalid"))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -72,7 +82,7 @@ pub struct KCmpConfig {
     pub endpoint: String,
     pub port: u32,
 
-    pub thing: String,
+    pub thing: Option<String>,
     pub cert: String,
     pub private: String,
     pub ca: String,
@@ -85,6 +95,7 @@ impl KdaemonConfig {
     }
 
     pub async fn config_verify(&self) -> Result<()> {
+        self.core.config_verify().await?;
         self.boss.config_verify().await?;
         self.cmp.config_verify().await
     }
@@ -119,9 +130,9 @@ impl KCmpConfig {
             return Err(anyhow!("{} invalid", &self.ca));
         }
 
-        /*if self.thing.is_none() {
+        if self.thing.is_none() {
             return Err(anyhow!("{:?} invalid", self.thing));
-        }*/
+        }
 
         Ok(())
     }

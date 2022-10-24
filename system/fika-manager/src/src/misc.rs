@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tracing::{debug, error, instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[cfg(feature = "ethers")]
+#[cfg(feature = "wallet")]
 use ethers::prelude::*;
 
 use chrono::prelude::*;
@@ -153,7 +153,7 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
     };
 
     let wallet = if let Some(wallet) = b.wallet {
-        wallet
+        Some(wallet)
     } else {
         core.wallet_address
     };
@@ -166,6 +166,12 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
                 path
             } else {
                 boss.ap_token_path
+            };
+
+            let wallet = if let Some(w) = wallet {
+                w
+            } else {
+                return Err(anyhow::anyhow!("wallet-address invalid"));
             };
 
             let url = format!("{}/{}", root_url, &path);
@@ -208,6 +214,12 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
                 path
             } else {
                 boss.ap_hcs_path
+            };
+
+            let wallet = if let Some(w) = wallet {
+                w
+            } else {
+                return Err(anyhow::anyhow!("wallet-address invalid"));
             };
 
             let url = format!("{}/{}", root_url, &path);
@@ -256,6 +268,12 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
                 boss.otp_path
             };
 
+            let wallet = if let Some(w) = wallet {
+                w
+            } else {
+                return Err(anyhow::anyhow!("wallet-address invalid"));
+            };
+
             let token = token.unwrap();
             let url = format!("{}/{}", root_url, &path);
 
@@ -294,6 +312,12 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
                 path
             } else {
                 boss.hcs_path
+            };
+
+            let wallet = if let Some(w) = wallet {
+                w
+            } else {
+                return Err(anyhow::anyhow!("wallet-address invalid"));
             };
 
             let token = token.unwrap();
@@ -336,6 +360,12 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
                 boss.ap_info_path
             };
 
+            let wallet = if let Some(w) = wallet {
+                w
+            } else {
+                return Err(anyhow::anyhow!("wallet-address invalid"));
+            };
+
             let token = token.unwrap();
             let url = format!("{}/{}", root_url, &path);
             let mut map = HashMap::new();
@@ -371,11 +401,6 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
             }
         }
         CurlBossPath::GetApWallet(map) => {
-            if token.is_none() {
-                error!("[kap][boss] ap-acess-token not exist");
-                return Err(anyhow!("[kap][boss] ap-acess-token not exist"));
-            }
-
             let path = if let Some(path) = b.path {
                 path
             } else {
@@ -420,7 +445,7 @@ pub async fn boss_tools(b: CurlBossOpt) -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "ethers")]
+#[cfg(feature = "wallet")]
 #[instrument(name = "wallet")]
 pub async fn wallet_tools(w: WalletCommand) -> Result<()> {
     match w {

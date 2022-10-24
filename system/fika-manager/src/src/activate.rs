@@ -343,9 +343,12 @@ async fn iot_fleet_provision(
         mqtt_provision_task(&cfg, &provision_rule).await?
     };
 
+    let wallet = cfg.core.wallet_address.unwrap();
+    let thingname = cfg.cmp.thing.unwrap();
+
     Ok(ActivateCertificate {
-        name: cfg.cmp.thing,
-        id: cfg.core.wallet_address,
+        name: thingname,
+        id: wallet,
         certificate: cert.0,
         issue_time: cert.1,
     })

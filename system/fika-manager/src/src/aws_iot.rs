@@ -308,7 +308,7 @@ pub async fn mqtt_dedicated_create(
 )> {
     //cmp.config_verify().await?;
 
-    let client_id = cmp.thing.clone();
+    let client_id = cmp.thing.as_ref().unwrap().clone();
     let aws = AWSIoTSettings::new(
         client_id,
         cmp.ca.clone(),
@@ -408,7 +408,7 @@ pub async fn mqtt_dedicated_create_start(
     db_chan: mpsc::Sender<DbCommand>,
     subscribe_ipc_tx: mpsc::Sender<SubscribeCmd>,
 ) -> Result<()> {
-    let thing = &cfg.cmp.thing;
+    let thing = cfg.cmp.thing.as_ref().unwrap();
     let pull_topic = dedicated.and_then(|d| d.pull_topic).or_else(|| None);
     let mut retry = 1;
 
