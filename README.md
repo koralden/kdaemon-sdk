@@ -6,6 +6,12 @@ The goal of longdong project is to establish...
 
 # Install
 
+## From released binary
+Just need download latest released tarball(.tar.gz) and untar to system path
+
+    $ tar xvfz {LATES-DOWNLOAD-TARBALL} -C /
+    # need sudo permission since default install path is /etc & /usr
+
 ## From Source
 
 To compile SDK, you need a Rust toolchain.
@@ -19,13 +25,16 @@ The following command install related package binaries:
 
 And then install configurations:
 
-    $ make install
-    # maybe need sudo permission since default install path is /etc
+    $ sudo make install
+
+(need sudo permission since default install path is /etc)
 
 Reestablish daemon configuation to match system.  
 **Make sure wan connection is OK before this operation**
 
-    $ fika-manager activate
+    $ sudo fika-manager activate
+
+(need sudo permission to modify & add in /userdata)
 
 Capture output and post to [community](https://discord.com/channels/975795016410755082/1030295373798985759).
   
@@ -36,7 +45,7 @@ but **INACTIVE** until confirm from community.
 ## Start-services
     
     $ fika-manager daemon
-    $ fika-easy-setup -a {RPI-LAN-IP} --certificate /etc/fika_easy_setup/certs/cert.pem --private-key /etc/fika_easy_setup/certs/key.pem
+    $ fika-easy-setup -a {RPI-LAN-IP}
 
 ## Pairing
 

@@ -1,4 +1,4 @@
-TARGET_DIR ?= ""
+#TARGET_DIR ?= ""
 INSTALL ?= "install"
 
 all: build
@@ -10,7 +10,7 @@ cargo-fika-manager:
 	cargo install --path system/fika-manager/src
 
 cargo-fika-easy-setup:
-	cargo install --path net/fika-easy-setup/src
+	cargo install -F pairing-only --path net/fika-easy-setup/src
 
 install: install-fika-manager install-fika-easy-setup
 
@@ -23,6 +23,7 @@ FIKA_MANAGER_SRC_SCRIPT=misc.sh common.sh \
 	factory/post_boss.sh factory/post_cmp.sh 
 
 install-fika-manager:
+	$(INSTALL) -m 0755 -D system/fika-manager/src/target/release/fika-manager $(TARGET_DIR)/usr/bin/fika-manager
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_SRC_DIR)/rule.toml.sample $(TARGET_DIR)/etc/fika_manager/rule.toml
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_SRC_DIR)/activate.toml.sample $(TARGET_DIR)/etc/fika_manager/activate.toml
 	$(INSTALL) -m 0644 -D $(FIKA_MANAGER_SRC_DIR)/kdaemon.toml.sample $(TARGET_DIR)/etc/fika_manager/kdaemon.toml.sample
@@ -37,6 +38,7 @@ install-fika-manager:
 FIKA_EASY_SETUP_SRC_DIR=net/fika-easy-setup/src
 
 install-fika-easy-setup:
+	$(INSTALL) -m 0755 -D net/fika-easy-setup/src/target/release/fika-easy-setup $(TARGET_DIR)/usr/bin/fika-easy-setup
 	$(INSTALL) -d $(TARGET_DIR)/etc/fika_easy_setup
 	cp -a $(FIKA_EASY_SETUP_SRC_DIR)/certs $(TARGET_DIR)/etc/fika_easy_setup
 	cp -a $(FIKA_EASY_SETUP_SRC_DIR)/templates/assets $(TARGET_DIR)/etc/fika_easy_setup
