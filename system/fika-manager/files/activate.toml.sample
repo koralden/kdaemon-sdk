@@ -4,12 +4,8 @@ post="/etc/fika_manager/factory/post_core.sh"
 key = "kap.core"
 
 [network]
-post="/etc/fika_manager/factory/post_wifi_ssid_by_uci.sh"
-key = "kap.system.config"
 
 [por]
-post="/etc/fika_manager/factory/post_por.sh"
-key = "kap.por.config"
 
 [boss]
 post="/etc/fika_manager/factory/post_boss.sh"

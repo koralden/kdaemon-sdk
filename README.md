@@ -13,19 +13,14 @@ See <https://rustup.rs/> for instructions.
 (Note that Rust compilers shipped with Linux distributions
 may be too outdated to compile SDK.)
 
-The following command install related packages:
+The following command install related package binaries:
 
-    $ cd longdong/system/fika-manager/src
-    $ cargo install --path .
-    $ cd longdong/net/fika-easy-setup/src
-    $ cargo install --path .
+    $ make all
 
-And then setup configurations:
+And then install configurations:
 
-    $ cp -a longdong/system/fika-manager/files /etc/fika_manager
-    $ install -d /etc/fika_easy_setup
-    $ cp -a longdong/net/fika-easy-setup/src/certs /etc/fika_easy_setup
-    $ cp -a longdong/net/fika-easy-setup/src/templates /etc/fika_easy_setup
+    $ make install
+    # maybe need sudo permission since default install path is /etc
 
 Reestablish daemon configuation to match system.  
 **Make sure wan connection is OK before this operation**
