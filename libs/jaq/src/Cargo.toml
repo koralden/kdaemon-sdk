@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "jaq-parse",
+    "jaq-core",
+    "jaq-std",
+    "jaq",
+]
+
+[profile.release]
+codegen-units = 1
