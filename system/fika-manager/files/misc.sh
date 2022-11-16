@@ -22,12 +22,25 @@ load_kdaemon_toml() {
 update_kdaemon_toml() {
     key=$1
     val=$(echo $2 | sed 's,",\\",g')
-
-    sed "s,^[\t #]*$key\s*=.*$,$key = \"$val\",g" -i $KDAEMON_TOML_PATH && sync
+    #sed "s,^[\t #]*$key\s*=.*$,$key = \"$val\",g" -i $KDAEMON_TOML_PATH && sync
+    
+    if echo $val | grep -q "^[0-9]"; then
+        if echo $val | grep -q "[^0-9]"; then
+            tomato -b $key "f:$val" $KDAEMON_TOML_PATH && sync
+        else
+            tomato -b $key "i:$val" $KDAEMON_TOML_PATH && sync
+        fi
+    else
+        if echo $val | grep -q -i -E "(false)|(true)"; then
+            tomato -b $key "b:$val" $KDAEMON_TOML_PATH && sync
+        else
+            tomato -b $key $val $KDAEMON_TOML_PATH && sync
+        fi
+    fi
 }
 
 # no double-quote
-update_kdaemon_toml_no_dq() {
+deprecated_update_kdaemon_toml_no_dq() {
     key=$1
     val=$2
 
@@ -67,8 +80,4 @@ fika_redis() {
     else
         redis-cli ${cmd}
     fi
-}
-
-fika_jq() {
-    jq $@
 }

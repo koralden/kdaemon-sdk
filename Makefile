@@ -1,19 +1,24 @@
 #TARGET_DIR ?= ""
-INSTALL ?= "install"
+INSTALL ?= /usr/bin/install
 
 all: build
 
 
-build: cargo-fika-manager cargo-fika-easy-setup
+build: cargo-packages
 
-cargo-fika-manager:
+cargo-packages:
 	cargo install --path system/fika-manager/src
-
-cargo-fika-easy-setup:
 	cargo install -F pairing-only --path net/fika-easy-setup/src
+	cargo install --path libs/tomato/src
+	#cargo install --path libs/jaq/src
+	cd libs/jaq/src && cargo build --release
 
-install: install-fika-manager install-fika-easy-setup
+install: $(TARGET_DIR) install-fika-manager install-fika-easy-setup
+	$(INSTALL) -m 0755 -D libs/jaq/src/target/release/jaq $(TARGET_DIR)/usr/bin/jaq
+	$(INSTALL) -m 0755 -D libs/tomato/src/target/release/tomato $(TARGET_DIR)/usr/bin/tomato
 
+$(TARGET_DIR):
+	mkdir -p $(TARGET_DIR)
 
 FIKA_MANAGER_SRC_DIR=system/fika-manager/files
 FIKA_MANAGER_SRC_SCRIPT=misc.sh common.sh \
@@ -45,6 +50,6 @@ install-fika-easy-setup:
 	cp -a $(FIKA_EASY_SETUP_SRC_DIR)/templates/assets $(TARGET_DIR)/etc/fika_easy_setup
 
 
-.PHONY: all build
-.PHONY: cargo-fika-manager install-fika-manager
-.PHONY: cargo-fika-easy-setup install-fika-easy-setup
+.PHONY: all build install
+.PHONY: cargo-packages
+.PHONY: install-fika-manager install-fika-easy-setup

@@ -20,9 +20,10 @@ check_boss_ap_token() {
 #check_ntp
 #check_boss_ap_token
 
-payload=$(jq -rcM --null-input \
+if payload=$(jaq -rc --null-input \
     --argjson code "$code" \
     --arg message "$message" \
-    '{ "code": $code, "message": $message }')
+    '{ "code": $code, "message": $message }'); then
 
-fika_redis SET kdaemon.system.checking $payload
+    fika_redis SET kdaemon.system.checking $payload
+fi

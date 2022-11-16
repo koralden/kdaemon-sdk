@@ -9,7 +9,7 @@ payload=$1 && shift
 code=404
 resp="fail"
 
-cmd=$(echo $payload | jq -r .command)
+cmd=$(echo $payload | jaq -r .command)
 
 #$("$@")
 #eval $@ >/dev/null
@@ -21,7 +21,7 @@ if [ -n "$cmd" ]; then
     logger -s -t fika-manager -p info "[$0] run $cmd ... $code"
 fi
 
-feedback=$(jq -rcM --null-input \
+feedback=$(jaq -rc --null-input \
     --arg msg "$resp" \
     --argjson code "$code" \
     '{ "message": $msg, "code": $code }')

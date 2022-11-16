@@ -122,16 +122,16 @@ cmp_wan() {
 
     new=$1 && shift
 
-    new_type=$(echo $new | jq -r .wan_type)
+    new_type=$(echo $new | jaq -r .wan_type)
     orig_type=${kdaemon_wan_type}
     [ "X${new_type}" != "X${orig_type}" ] && return 0
 
     if [ "X$type" = "X1" ]; then
-        new_username=$(echo $new | jq -r .wan_username)
+        new_username=$(echo $new | jaq -r .wan_username)
         orig_username=${kdaemon_wan_username}
         [ "X${new_username}" != "X${orig_username}" ] && return 0
 
-        new_password=$(echo $new | jq -r .wan_password)
+        new_password=$(echo $new | jaq -r .wan_password)
         orig_password=${kdaemon_wan_password}
         [ "X${new_password}" != "X${orig_password}" ] && return 0
     fi
@@ -145,11 +145,11 @@ cmp_wlan() {
 
     new=$1 && shift
 
-    new_ssid=$(echo $new | jq -r .wifi_ssid)
+    new_ssid=$(echo $new | jaq -r .wifi_ssid)
     orig_ssid=${kdaemon_wifi_ssid}
     [ "X${new_ssid}" != "X${orig_ssid}" ] && return 0
 
-    new_password=$(echo $new | jq -r .wifi_password)
+    new_password=$(echo $new | jaq -r .wifi_password)
     orig_password=${kdaemon_wifi_password}
     [ "X${new_password}" != "X${orig_password}" ] && return 0
 
@@ -162,11 +162,11 @@ cmp_system_pwd() {
 
     new=$1 && shift
 
-    new_overwrt=$(echo $new | jq -r .password_overwrite)
+    new_overwrt=$(echo $new | jaq -r .password_overwrite)
     orig_overwrt=${kdaemon_password_overwrite}
     [ "X${new_overwrt}" != "X${orig_overwrt}" ] && return 0
 
-    new_password=$(echo $new | jq -r .wifi_password)
+    new_password=$(echo $new | jaq -r .wifi_password)
     orig_password=${kdaemon_wifi_password}
     [ "X${new_password}" != "X${orig_password}" ] && return 0
 
@@ -180,10 +180,10 @@ main() {
     system_cb
 
     if cmp_wan "$cfg"; then
-        type=$(echo $cfg | jq -r .wan_type)
+        type=$(echo $cfg | jaq -r .wan_type)
         if [ "X$type" = "X1" ]; then
-            username=$(echo $cfg | jq -r .wan_username)
-            password=$(echo $cfg | jq -r .wan_passwod)
+            username=$(echo $cfg | jaq -r .wan_username)
+            password=$(echo $cfg | jaq -r .wan_passwod)
             wan_cb pppoe "$username" "$password"
 
             update_kdaemon_toml wan_username "$username"
@@ -194,12 +194,12 @@ main() {
             wan_cb dhcp
         fi
         networkChg=true
-        update_kdaemon_toml_no_dq wan_type $type
+        update_kdaemon_toml wan_type $type
     fi
 
     if cmp_wlan "$cfg"; then
-        pssid=$(echo $cfg | jq -r .wifi_ssid)
-        ppassword=$(echo $cfg | jq -r .wifi_password)
+        pssid=$(echo $cfg | jaq -r .wifi_ssid)
+        ppassword=$(echo $cfg | jaq -r .wifi_password)
 
         wlan_cb private "$pssid" "$ppassword"
         networkChg=true
@@ -208,7 +208,7 @@ main() {
     fi
 
     if cmp_system_pwd "$cfg"; then
-        overwrite=$(echo $cfg | jq -r .password_overwrite)
+        overwrite=$(echo $cfg | jaq -r .password_overwrite)
         account_cb modify $overwrite "$ppassword"
 
         update_kdaemon_toml password_overwrite "$overwrite"
@@ -220,7 +220,7 @@ main() {
         fika_redis PUBLISH ${DbKey}.ack fail
     fi
 
-    jq -rcM --null-input \
+    jaq -rc --null-input \
         --arg msg "$msg" \
         --argjson code "$code" \
         '{ "message": $msg, "code": $code }'

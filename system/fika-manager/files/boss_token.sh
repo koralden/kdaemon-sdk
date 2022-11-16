@@ -23,8 +23,8 @@ remove_expired_task() {
     now=$(date +%s)
     for item in $(fika_redis LRANGE ${KEY_BOSS_HCS_LIST} 0 -1); do
         [ -z "$item" ] && break
-        tid=$(echo $item | jq -r .hcs_token)
-        invalidT=$(echo $item | jq -r .invalid_time)
+        tid=$(echo $item | jaq -r .hcs_token)
+        invalidT=$(echo $item | jaq -r .invalid_time)
         invalidS=$(fika-manager time timestamp $invalidT)
 
         if [ $now -ge $invalidS ]; then
@@ -35,7 +35,7 @@ remove_expired_task() {
             older=$(fika_redis LMOVE ${KEY_BOSS_HCS_LIST} ${KEY_BOSS_HCS_LIST}.history LEFT RIGHT)
             fika_log info "[hcs] move ${older} to ${KEY_BOSS_HCS_LIST}.history"
             if [ $(fika_redis LLEN ${KEY_BOSS_HCS_LIST}.history) -eq 128 ]; then
-                tid=$(fika_redis LPOP ${KEY_BOSS_HCS_LIST}.history | jq -r .hcs_token)
+                tid=$(fika_redis LPOP ${KEY_BOSS_HCS_LIST}.history | jaq -r .hcs_token)
                 fika_redis DEL ${KEY_BOSS_HCS_CHALLENGERS}.${tid}
                 fika_log warn "[hcs] drop ${tid} from ${KEY_BOSS_HCS_LIST}.history"
             fi
@@ -50,17 +50,17 @@ get_main() {
     local lastToken hcsToken
 
     if tasks=$(fika-manager boss get-hcs); then
-        lastToken=$(fika_redis LINDEX ${KEY_BOSS_HCS_LIST} -1 | jq -r .hcs_token)
+        lastToken=$(fika_redis LINDEX ${KEY_BOSS_HCS_LIST} -1 | jaq -r .hcs_token)
         [ -z "${lastToken}" -o "Xnull" = "X${lastToken}" ] && lastToken="0000000000"
 
-        echo $tasks | jq -cr .[] | \
+        echo $tasks | jaq -cr .[] | \
             while read item; do
-                hcsToken=$(echo $item | jq -r .hcs_token)
+                hcsToken=$(echo $item | jaq -r .hcs_token)
                 if [ ${hcsToken} != ${lastToken} ]; then
                     fika_redis RPUSH ${KEY_BOSS_HCS_LIST} "$item"
 
                     if [ $(fika_redis LLEN ${KEY_BOSS_HCS_LIST}) -eq 128 ]; then
-                        tid=$(fika_redis LPOP ${KEY_BOSS_HCS_LIST} | jq -r .hcs_token)
+                        tid=$(fika_redis LPOP ${KEY_BOSS_HCS_LIST} | jaq -r .hcs_token)
                         fika_log error "[hcs] ${KEY_BOSS_HCS_LIST} overflow(128), drop ${tid}"
                         break
                     fi

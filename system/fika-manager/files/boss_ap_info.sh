@@ -14,11 +14,11 @@ keySet="kap.boss.ap.info"
 
 old=$(fika_redis GET ${keySet})
 
-oldUserWallet=$(echo "$old" | jq -r .user_wallet)
-oldDeviceNickname=$(echo "$old" | jq -r .device_nickname)
+oldUserWallet=$(echo "$old" | jaq -r .user_wallet)
+oldDeviceNickname=$(echo "$old" | jaq -r .device_nickname)
 
-newUserWallet=$(echo "$info" | jq -r .user_wallet)
-newDeviceNickname=$(echo "$info" | jq -r .device_nickname)
+newUserWallet=$(echo "$info" | jaq -r .user_wallet)
+newDeviceNickname=$(echo "$info" | jaq -r .device_nickname)
 
 fika_redis SET "${keySet}" "${info}" 2>&1 >/dev/null
 fika_redis EXPIRE ${keySet} 10 2>&1 >/dev/null

@@ -12,30 +12,30 @@ private_ssid="TODO"
 private_client_num=1    # TODO
 private_rssi=60.1       # TODO
 
-wan=$(jq -rcM --null-input \
+wan=$(jaq -rc --null-input \
     --arg type "$type" \
     --arg ipaddr "$ipaddr" \
     --arg bandwidth "$bandwidth" \
     '{ "type": $type, "ipaddress": $ipaddr, "bandwidth": $bandwidth }')
 
-wlan_public=$(jq -rcM --null-input \
+wlan_public=$(jaq -rc --null-input \
     --arg ssid "$public_ssid" \
     --argjson cn "$public_client_num" \
     --argjson rssi "$public_rssi" \
     '{ "ssid": $ssid, "client-number": $cn, "rssi": $rssi }')
 
-wlan_private=$(jq -rcM --null-input \
+wlan_private=$(jaq -rc --null-input \
     --arg ssid "$private_ssid" \
     --argjson cn "$private_client_num" \
     --argjson rssi "$private_rssi" \
     '{ "ssid": $ssid, "client-number": $cn, "rssi": $rssi }')
 
-wlan=$(jq -rcM --null-input \
+wlan=$(jaq -rc --null-input \
     --argjson public "$wlan_public" \
     --argjson private "$wlan_private" \
     '{ "public": $public, "private": $private }')
 
-jq -rcM --null-input \
+jaq -rc --null-input \
     --argjson wan "$wan" \
     --argjson wireless "$wlan" \
     '{ "wan": $wan, "wireless": $wireless }'

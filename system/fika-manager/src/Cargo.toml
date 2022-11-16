@@ -33,4 +33,4 @@ tracing = "0.1.35"
 tracing-futures = "0.2.5"
 atty = "0.2.14"
 colored_json = "3.0.1"
-fika-utils = { git = "https://github.com/koralden/fika-utils.rs.git", rev = "d03ca662", features = ["boss-api", "aws-iot", "wallet"] }
+fika-utils = { git = "https://github.com/koralden/fika-utils.rs.git", rev = "ac87105a", features = ["boss-api", "aws-iot", "wallet"] }

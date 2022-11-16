@@ -52,18 +52,18 @@ report_boss_hcs() {
         return
     fi
 
-    [ "X$(echo $challenger | jq .sent)" = "Xtrue" ] && return
+    [ "X$(echo $challenger | jaq .sent)" = "Xtrue" ] && return
 
-    hashed=$(echo $challenger | jq -r .hashed)
+    hashed=$(echo $challenger | jaq -r .hashed)
 
-    json=$(jq -rcM --null-input \
+    json=$(jaq -rc --null-input \
         --arg wallet "${kdaemon_wallet_address}" \
         --arg hash "$hashed" \
         --arg token "$tid" \
         '{ "ap_wallet": $wallet,"hash":$hash,"hcs_token":$token}')
 
     if fika-manager boss post-ap-hcs "${json}"; then
-        changed=$(echo $challenger | jq -rcM --argjson sent true '.sent = $sent')
+        changed=$(echo $challenger | jaq -rc --argjson sent true '.sent = $sent')
         fika_redis HSET ${KEY_BOSS_HCS_CHALLENGERS}.${tid} ${cid} "${changed}"
         true
     else
@@ -77,7 +77,7 @@ post_main() {
 
     cid=$1 && shift
 
-    tid=$(fika_redis LINDEX ${KEY_BOSS_HCS_LIST} 0 | jq -r .hcs_token)
+    tid=$(fika_redis LINDEX ${KEY_BOSS_HCS_LIST} 0 | jaq -r .hcs_token)
     [ -z "${tid}" -o "Xnull" = "X${tid}" ] \
         && fika_log error "[hcs] not task for ${cid}" \
         && exit 127
