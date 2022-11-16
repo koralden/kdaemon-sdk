@@ -78,6 +78,10 @@ struct Cli {
     #[arg(long, value_names = &["a", "v"])]
     arg: Vec<String>,
 
+    /// set variable `$<a>` to json "<v>"
+    #[arg(long, value_names = &["a", "v"])]
+    argjson: Vec<String>,
+
     /// Filter to execute, followed by list of input files
     args: Vec<String>,
 }
@@ -123,6 +127,15 @@ fn real_main() -> Result<ExitCode, Error> {
         if let [arg, val] = arg_val {
             vars.push(arg.clone());
             ctx.push(Val::Str(val.clone().into()));
+        }
+    }
+
+    for arg_val in cli.argjson.chunks(2) {
+        if let [arg, val] = arg_val {
+            vars.push(arg.clone());
+            let j = serde_json::from_str::<Value>(val)
+                .map_err(|e| Error::Parse(e.to_string()))?;
+            ctx.push(j.into());
         }
     }
 

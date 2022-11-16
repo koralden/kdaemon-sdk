@@ -5,6 +5,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::str::FromStr;
 use toml_edit::{Document, Item, Value};
+//use chrono::{DateTime, Utc};
 
 mod json;
 use json::format_json;
@@ -59,7 +60,7 @@ pub enum Command {
         /// The key to set a value for. Use dots as path separators.
         key: Keyspec,
         /// The new value.
-        value: String,
+        value: Valuespec,
         /// The toml file to read from. Omit to read from stdin. If you read from stdin,
         /// the normal output of the old value is suppressed. Instead the modified file is written
         /// to stdout in json if you requested json, toml otherwise.
@@ -82,6 +83,50 @@ pub enum Command {
         shell: Shell,
     },
 }
+
+#[derive(Clone, Debug)]
+pub enum Valuespec {
+    String(String),
+    /// A 64-bit integer value.
+    Integer(i64),
+    /// A 64-bit float value.
+    Float(f64),
+    /// A boolean value.
+    Boolean(bool),
+    // An RFC 3339 formatted date-time with offset.
+    //Datetime(DateTime<Utc>),
+}
+
+impl From<&Valuespec> for Value {
+    fn from(s: &Valuespec) -> Self {
+        match s {
+            Valuespec::String(s) => s.into(),
+            Valuespec::Integer(i) => i.clone().into(),
+            Valuespec::Float(f) => f.clone().into(),
+            Valuespec::Boolean(b) => b.clone().into(),
+            //Valuespec::Datetime(d) => d.into(),
+        }
+    }
+}
+
+impl FromStr for Valuespec {
+    type Err = anyhow::Error;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        //let tokens: Vec<&str> = input.split(':').collect();
+
+        let subvalue = match input.split_once(':') {
+            Some(("b", b)) => Valuespec::Boolean(b.parse::<bool>().expect("true or false only")),
+            //Some(("d", d)) => Valuespec::Datetime(d.parse::<DateTime<Utc>>().expect("RFC3339 format string")),
+            Some(("i", i)) => Valuespec::Integer(i.parse::<i64>().expect("integer")),
+            Some(("f", f)) => Valuespec::Float(f.parse::<f64>().expect("float")),
+            _ => Valuespec::String(input.to_string()),
+        };
+
+        Ok(subvalue)
+    }
+}
+
 
 #[derive(Clone, Debug)]
 /// How to format the output of more complex data structures.
@@ -211,7 +256,7 @@ pub fn remove_key(toml: &mut Document, dotted_key: &Keyspec) -> Result<Item, any
 pub fn set_key(
     toml: &mut Document,
     dotted_key: &Keyspec,
-    value: &str,
+    value: &Valuespec,
 ) -> Result<Item, anyhow::Error> {
     let mut node: &mut Item = toml.as_item_mut();
     let iterator = dotted_key.subkeys.iter();
