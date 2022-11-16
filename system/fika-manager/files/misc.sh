@@ -16,18 +16,20 @@ load_kdaemon_toml() {
 
     conf=$KDAEMON_TOML_PATH
     [ $# -gt 0 ] && conf=$1
-    eval "$(sed -e '/^\[/d' -e '/^#/d' -e '/^\s*$/d' -e 's,^,kdaemon_,g' -e 's, = ,=,g' $conf)"
+    #eval "$(sed -e '/^\[/d' -e '/^#/d' -e '/^\s*$/d' -e 's,^,kdaemon_,g' -e 's, = ,=,g' $conf)"
+    eval $(tomato -f sh dump $conf)
 }
 
 update_kdaemon_toml() {
     key=$1
-    val=$(echo $2 | sed 's,",\\",g')
-
-    sed "s,^[\t #]*$key\s*=.*$,$key = \"$val\",g" -i $KDAEMON_TOML_PATH && sync
+    type=$2
+    val=$3
+    
+    tomato -b tset $key "$val" $KDAEMON_TOML_PATH && sync
 }
 
 # no double-quote
-update_kdaemon_toml_no_dq() {
+deprecated_update_kdaemon_toml_no_dq() {
     key=$1
     val=$2
 
@@ -67,8 +69,4 @@ fika_redis() {
     else
         redis-cli ${cmd}
     fi
-}
-
-fika_jq() {
-    jq $@
 }

@@ -15,16 +15,16 @@ APInfoKey="kap.boss.ap.info"
 fika_redis SET $APInfoKey "${info}" 2>&1 >/dev/null
 fika_log info "[$0] save ${info} into $APInfoKey"
 
-newUserWallet=$(echo "$info" | jq -r .user_wallet)
-newDeviceNickname=$(echo "$info" | jq -r .device_nickname)
+newUserWallet=$(echo "$info" | jaq -r .user_wallet)
+newDeviceNickname=$(echo "$info" | jaq -r .device_nickname)
 
 provisionUpdate=false
 if [ "x$kdaemon_nickname" != "x$newDeviceNickname" ]; then
-    update_kdaemon_toml nickname "${newDeviceNickname}"
+    update_kdaemon_toml por.nickname str "${newDeviceNickname}"
     provisionUpdate=true
 fi
-if [ "x$oldUserWallet" != "x$newUserWallet" ]; then
-    update_kdaemon_toml user_wallet ${newUserWallet}
+if [ "x$kdaemon_user_wallet" != "x$newUserWallet" ]; then
+    update_kdaemon_toml core.user_wallet str ${newUserWallet}
     provisionUpdate=true
 fi
 

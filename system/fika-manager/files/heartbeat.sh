@@ -16,7 +16,7 @@ uptime=$(cat /proc/uptime  | awk '{print $1}')
 
 systime=$(fika-manager time rfc3339)
 
-jq -rcM --null-input \
+jaq -rc --null-input \
     --argjson uptime "$uptime" \
     --argjson latency "$latency" \
     --arg systime "$systime" \

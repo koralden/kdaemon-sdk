@@ -52,6 +52,55 @@ fn format_bash_value(v: Value) -> String {
     }
 }
 
+/// Format a toml_edit::Item and all child items as eval-able bash, if possible.
+pub fn format_sh(item: &Item) -> String {
+    // 'ware hackery!
+    match item {
+        Item::None => "".to_string(),
+        Item::Value(v) => format_sh_value(v.clone()),
+        Item::Table(table) => {
+            let mut lines = vec!["".to_string()];
+            table.iter().for_each(|(k, v)| {
+                lines.push(format!("kdaemon_{k}={}", format_sh(v)));
+            });
+            lines.join("\n")
+        }
+        // TODO: This bails and emits toml. It might instead emit a lot of
+        // more usable bash, but... tbh in this situation the caller should
+        // snag json and pass it to jq.
+        Item::ArrayOfTables(aot) => aot.to_string(),
+    }
+}
+
+/// Format a toml_edit::Value as a bash data type, if possible
+fn format_sh_value(v: Value) -> String {
+    match v {
+        Value::String(s) => s.to_string().trim().to_string(),
+        Value::Integer(i) => i.into_value().to_string(),
+        Value::Float(f) => f.into_value().to_string(),
+        Value::Boolean(b) => b.into_value().to_string(),
+        Value::Datetime(dt) => dt.into_value().to_string(),
+        Value::Array(array) => {
+            let output = array
+                .iter()
+                .map(|xs| format_bash_value(xs.clone()).trim().to_owned())
+                .collect::<Vec<String>>()
+                .join(" ");
+            format!("( {output} )")
+        }
+        Value::InlineTable(table) => {
+            // this could be better. probably should add a keyname param all the way up
+            // the chain to make this case work
+            //let mut lines = vec!["declare -A bashval".to_string()];
+            let mut lines = Vec::new();
+            table.iter().for_each(|(k, v)| {
+                lines.push(format!("kdaemon_{k}={}", format_bash_value(v.clone())));
+            });
+            lines.join("\n")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

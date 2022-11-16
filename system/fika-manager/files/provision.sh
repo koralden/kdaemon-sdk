@@ -12,7 +12,7 @@ boss_owner_info() {
 
     if info=$(fika-manager boss get-ap-info); then
         fika_log debug "fika-manager boss get-ap-info => ${info}"
-        owner=$(echo $info | jq -r .user_wallet)
+        owner=$(echo $info | jaq -r .user_wallet)
         echo $owner
         return 0
     else
@@ -30,7 +30,7 @@ provision_main() {
     owner="${kdaemon_user_wallet}"
     [ -z "$owner" -o "X$owner" = "Xnull" ] && owner=$(boss_owner_info)
 
-    jq -rcM --null-input \
+    jaq -rc --null-input \
         --arg sdk "$sdk" \
         --arg wallet "$wallet" \
         --arg nickname "$nickname" \
@@ -46,7 +46,7 @@ provision_sync_aws() {
     ipcKey="kap/aws/shadow/$provisionTopic"
     if [ -n "$ipcKey" ]; then
         fika_log debug "[provision-sync-aws] publish $ipcKey $payload ..."
-        echo $payload | jq -c && fika_redis PUBLISH $ipcKey "$payload"
+        echo $payload | jaq -c && fika_redis PUBLISH $ipcKey "$payload"
     fi
 }
 

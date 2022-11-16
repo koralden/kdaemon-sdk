@@ -14,11 +14,11 @@ keySet="kap.boss.ap.info"
 
 old=$(fika_redis GET ${keySet})
 
-oldUserWallet=$(echo "$old" | jq -r .user_wallet)
-oldDeviceNickname=$(echo "$old" | jq -r .device_nickname)
+oldUserWallet=$(echo "$old" | jaq -r .user_wallet)
+oldDeviceNickname=$(echo "$old" | jaq -r .device_nickname)
 
-newUserWallet=$(echo "$info" | jq -r .user_wallet)
-newDeviceNickname=$(echo "$info" | jq -r .device_nickname)
+newUserWallet=$(echo "$info" | jaq -r .user_wallet)
+newDeviceNickname=$(echo "$info" | jaq -r .device_nickname)
 
 fika_redis SET "${keySet}" "${info}" 2>&1 >/dev/null
 fika_redis EXPIRE ${keySet} 10 2>&1 >/dev/null
@@ -26,11 +26,11 @@ fika_log info "[$0] save ${info}/10s into ${keySet}"
 
 provisionUpdate=false
 if [ "x$kdaemon_nickname" != "x$newDeviceNickname" ]; then
-    update_kdaemon_toml nickname "${newDeviceNickname}"
+    update_kdaemon_toml por.nickname str "${newDeviceNickname}"
     provisionUpdate=true
 fi
 if [ "x$oldUserWallet" != "x$newUserWallet" ]; then
-    update_kdaemon_toml user_wallet ${newUserWallet}
+    update_kdaemon_toml core.user_wallet str ${newUserWallet}
     provisionUpdate=true
 fi
 if [ "x$oldDeviceNickname" != "x$newDeviceNickname" ]; then

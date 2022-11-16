@@ -5,12 +5,12 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::str::FromStr;
 use toml_edit::{Document, Item, Value};
-//use chrono::{DateTime, Utc};
+use toml_edit::Datetime;
 
 mod json;
 use json::format_json;
 mod bash;
-use bash::format_bash;
+use bash::{format_bash, format_sh};
 mod keys;
 use keys::*;
 
@@ -60,7 +60,7 @@ pub enum Command {
         /// The key to set a value for. Use dots as path separators.
         key: Keyspec,
         /// The new value.
-        value: Valuespec,
+        value: String,
         /// The toml file to read from. Omit to read from stdin. If you read from stdin,
         /// the normal output of the old value is suppressed. Instead the modified file is written
         /// to stdout in json if you requested json, toml otherwise.
@@ -82,51 +82,55 @@ pub enum Command {
         #[clap(arg_enum)]
         shell: Shell,
     },
+    #[clap(display_order = 5)]
+    Dump {
+        /// The toml file to read from. Omit to read from stdin.
+        file: Option<String>,
+    },
+    /// Set a key to the given value, returning the previous value if one existed.
+    #[clap(display_order = 6)]
+    Tset {
+        /// The key to set a value for. Use dots as path separators.
+        key: Keyspec,
+        /// The new type.
+        vtype: Typespec,
+        /// The new value.
+        value: String,
+        /// The toml file to read from. Omit to read from stdin. If you read from stdin,
+        /// the normal output of the old value is suppressed. Instead the modified file is written
+        /// to stdout in json if you requested json, toml otherwise.
+        file: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
-pub enum Valuespec {
-    String(String),
+pub enum Typespec {
+    String,
     /// A 64-bit integer value.
-    Integer(i64),
+    Integer,
     /// A 64-bit float value.
-    Float(f64),
+    Float,
     /// A boolean value.
-    Boolean(bool),
+    Boolean,
     // An RFC 3339 formatted date-time with offset.
-    //Datetime(DateTime<Utc>),
+    Datetime,
 }
 
-impl From<&Valuespec> for Value {
-    fn from(s: &Valuespec) -> Self {
-        match s {
-            Valuespec::String(s) => s.into(),
-            Valuespec::Integer(i) => i.clone().into(),
-            Valuespec::Float(f) => f.clone().into(),
-            Valuespec::Boolean(b) => b.clone().into(),
-            //Valuespec::Datetime(d) => d.into(),
-        }
-    }
-}
-
-impl FromStr for Valuespec {
+impl FromStr for Typespec {
     type Err = anyhow::Error;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        //let tokens: Vec<&str> = input.split(':').collect();
-
-        let subvalue = match input.split_once(':') {
-            Some(("b", b)) => Valuespec::Boolean(b.parse::<bool>().expect("true or false only")),
-            //Some(("d", d)) => Valuespec::Datetime(d.parse::<DateTime<Utc>>().expect("RFC3339 format string")),
-            Some(("i", i)) => Valuespec::Integer(i.parse::<i64>().expect("integer")),
-            Some(("f", f)) => Valuespec::Float(f.parse::<f64>().expect("float")),
-            _ => Valuespec::String(input.to_string()),
+        let subvalue = match input {
+            "bool" => Typespec::Boolean,
+            "date" => Typespec::Datetime,
+            "int" => Typespec::Integer,
+            "float" => Typespec::Float,
+            _ => Typespec::String,
         };
 
         Ok(subvalue)
     }
 }
-
 
 #[derive(Clone, Debug)]
 /// How to format the output of more complex data structures.
@@ -139,6 +143,8 @@ pub enum Format {
     Json,
     /// Output valid TOML
     Toml,
+    /// Suitable for dropping into bash for eval; might not be suitable for complex structures
+    Sh,
 }
 
 impl FromStr for Format {
@@ -150,6 +156,7 @@ impl FromStr for Format {
             "bash" => Ok(Format::Bash),
             "json" => Ok(Format::Json),
             "toml" => Ok(Format::Toml),
+            "sh" => Ok(Format::Sh),
             _ => Err(anyhow::anyhow!("{input} is not a supported output type")),
         }
     }
@@ -256,7 +263,7 @@ pub fn remove_key(toml: &mut Document, dotted_key: &Keyspec) -> Result<Item, any
 pub fn set_key(
     toml: &mut Document,
     dotted_key: &Keyspec,
-    value: &Valuespec,
+    value: &str,
 ) -> Result<Item, anyhow::Error> {
     let mut node: &mut Item = toml.as_item_mut();
     let iterator = dotted_key.subkeys.iter();
@@ -285,6 +292,49 @@ pub fn set_key(
     Ok(original)
 }
 
+/// Set the given key to the new value, and respond with the original value.
+/// Replaces null nodes if the parent was found, adding a new key to the
+/// document. Reponds with an error if the key included an index into an
+/// array for a non-array node in the document.
+pub fn tset_key(
+    toml: &mut Document,
+    dotted_key: &Keyspec,
+    value_type: &Typespec,
+    value: &str,
+) -> Result<Item, anyhow::Error> {
+    let mut node: &mut Item = toml.as_item_mut();
+    let iterator = dotted_key.subkeys.iter();
+    let mut found: Option<&mut Item>;
+
+    for k in iterator {
+        found = get_in_node(k, node);
+        if found.is_none() {
+            anyhow::bail!("unable to index into non-array at {}", dotted_key);
+        }
+        node = found.unwrap();
+    }
+
+    let original = node.clone();
+    let existing: &mut Item = &mut *node;
+
+    // Straight outta cargo-edit
+    let existing_decor = existing
+        .as_value()
+        .map(|v| v.decor().clone())
+        .unwrap_or_default();
+    let mut new_value: Value = match value_type {
+        Typespec::String => value.into(),
+        Typespec::Integer => value.parse::<i64>()?.into(),
+        Typespec::Float => value.parse::<f64>()?.into(),
+        Typespec::Boolean => value.parse::<bool>()?.into(),
+        Typespec::Datetime => value.parse::<Datetime>()?.into(),
+    };
+    *new_value.decor_mut() = existing_decor;
+    *existing = toml_edit::Item::Value(new_value);
+
+    Ok(original)
+}
+
 /// Format the given toml_edit item for the desired kind of output.
 pub fn format_item(item: &Item, output: Format) -> String {
     match output {
@@ -292,6 +342,7 @@ pub fn format_item(item: &Item, output: Format) -> String {
         Format::Bash => format_bash(item),
         Format::Json => format_json(item),
         Format::Toml => format_toml(item),
+        Format::Sh => format_sh(item),
     }
 }
 
@@ -379,6 +430,27 @@ fn main() -> anyhow::Result<(), anyhow::Error> {
             use clap::CommandFactory;
             let mut app = Args::command();
             generate(shell, &mut app, "tomato", &mut std::io::stdout())
+        }
+        Command::Dump { file } => {
+            let toml = parse_file(file.as_ref())?;
+            let item = toml.as_item();
+            println!("{}", format_item(&item, args.format));
+        }
+        Command::Tset { key, vtype, value, file } => {
+            let mut toml = parse_file(file.as_ref())?;
+            let original = tset_key(&mut toml, &key, &vtype, &value)?;
+            match file {
+                None => {
+                    match args.format {
+                        Format::Json => println!("{}", format_item(toml.as_item(), args.format)),
+                        _ => println!("{toml}"),
+                    };
+                }
+                Some(filepath) => {
+                    write_file(&toml, &filepath, args.backup)?;
+                    println!("{}", format_item(&original, args.format));
+                }
+            }
         }
     };
 
