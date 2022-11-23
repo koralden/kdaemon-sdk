@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "fika-easy-setup"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "async-session",
@@ -812,7 +812,7 @@ dependencies = [
 [[package]]
 name = "fika-utils"
 version = "0.0.7"
-source = "git+https://github.com/koralden/fika-utils.rs.git?rev=d03ca662#d03ca66295a9397d4ddd8677c531ed822d335e77"
+source = "git+https://github.com/koralden/fika-utils.rs.git?rev=ac87105a#ac87105acfaad157df860df2aa2ec187d73b81df"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2044,7 +2044,7 @@ dependencies = [
 [[package]]
 name = "shadow"
 version = "0.0.1"
-source = "git+https://github.com/koralden/fika-utils.rs.git?rev=d03ca662#d03ca66295a9397d4ddd8677c531ed822d335e77"
+source = "git+https://github.com/koralden/fika-utils.rs.git?rev=ac87105a#ac87105acfaad157df860df2aa2ec187d73b81df"
 dependencies = [
  "libc",
 ]

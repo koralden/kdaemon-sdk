@@ -32,7 +32,7 @@ use fika_utils::{
 #[clap(
     name = "fika-easy-setup",
     about = "FIKA easy setup server for pairing, challenge and  easy setup",
-    version = "0.0.7"
+    version
 )]
 pub struct Opt {
     /// set the listen addr
