@@ -10,7 +10,7 @@
 
 ## 激活
 
-[![asciicast](https://asciinema.org/a/539668.svg)](https://asciinema.org/a/539668)
+[![asciicast](https://asciinema.org/a/539668.svg)](https://asciinema.org/a/539668?autoplay=1)
 
 ## 綁定
 
