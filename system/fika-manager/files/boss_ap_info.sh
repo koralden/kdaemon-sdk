@@ -26,11 +26,11 @@ fika_log info "[$0] save ${info}/10s into ${keySet}"
 
 provisionUpdate=false
 if [ "x$kdaemon_nickname" != "x$newDeviceNickname" ]; then
-    update_kdaemon_toml nickname "${newDeviceNickname}"
+    update_kdaemon_toml por.nickname str "${newDeviceNickname}"
     provisionUpdate=true
 fi
 if [ "x$oldUserWallet" != "x$newUserWallet" ]; then
-    update_kdaemon_toml user_wallet ${newUserWallet}
+    update_kdaemon_toml core.user_wallet str ${newUserWallet}
     provisionUpdate=true
 fi
 if [ "x$oldDeviceNickname" != "x$newDeviceNickname" ]; then

@@ -14,11 +14,11 @@ dbPort=$(echo $dbUrl | awk -F: '{print $3}')
 
 mac=$(ip link show dev eth0 | awk '/link/ {print tolower($2)}')
 if [ -z "${kdaemon_mac_address}" -o "${kdaemon_mac_address}" = "CHANGEME" ]; then
-    update_kdaemon_toml mac_address $mac
+    update_kdaemon_toml core.mac_address str $mac
 fi
 
 if [ -z "${kdaemon_serial_number}" -o "${kdaemon_serial_number}" = "CHANGEME" ]; then
     sn=$(echo $mac | awk '{gsub(":", "", $0); print tolower($0)}')
-    update_kdaemon_toml serial_number $sn
+    update_kdaemon_toml core.serial_number str $sn
 fi
 sync;sync

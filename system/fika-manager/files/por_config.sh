@@ -25,7 +25,7 @@ main() {
         fi
         code=200
         networkChg=true
-        update_kdaemon_toml state $state
+        update_kdaemon_toml por.state bool $state
     else
         code=201
     fi
@@ -33,7 +33,7 @@ main() {
     nickname=$(echo "$cfg" | jaq -r .nickname)
     orig_nickname=${kdaemon_nickname}
     if [ "X$nickname" != "X${orig_nickname}" ]; then
-        update_kdaemon_toml nickname "$nickname"
+        update_kdaemon_toml por.nickname str "$nickname"
 
         #XXX update nickname via CMP/provistion
         provision_sync_aws

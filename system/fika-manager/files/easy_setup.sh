@@ -186,15 +186,15 @@ main() {
             password=$(echo $cfg | jaq -r .wan_passwod)
             wan_cb pppoe "$username" "$password"
 
-            update_kdaemon_toml wan_username "$username"
-            update_kdaemon_toml wan_password "$password"
+            update_kdaemon_toml network.wan_username str "$username"
+            update_kdaemon_toml network.wan_password str "$password"
         elif [ "X$type" = "X2" ]; then
             wan_cb wwan "$username" "$password"
         else
             wan_cb dhcp
         fi
         networkChg=true
-        update_kdaemon_toml wan_type $type
+        update_kdaemon_toml network.wan_type int $type
     fi
 
     if cmp_wlan "$cfg"; then
@@ -203,15 +203,15 @@ main() {
 
         wlan_cb private "$pssid" "$ppassword"
         networkChg=true
-        update_kdaemon_toml wifi_ssid "$pssid"
-        update_kdaemon_toml wifi_password "$ppassword"
+        update_kdaemon_toml network.wifi_ssid str "$pssid"
+        update_kdaemon_toml network.wifi_password str "$ppassword"
     fi
 
     if cmp_system_pwd "$cfg"; then
         overwrite=$(echo $cfg | jaq -r .password_overwrite)
         account_cb modify $overwrite "$ppassword"
 
-        update_kdaemon_toml password_overwrite "$overwrite"
+        update_kdaemon_toml network.password_overwrite str "$overwrite"
     fi
 
     if [ $code -eq 200 ]; then

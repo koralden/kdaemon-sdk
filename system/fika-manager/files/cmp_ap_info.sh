@@ -20,11 +20,11 @@ newDeviceNickname=$(echo "$info" | jaq -r .device_nickname)
 
 provisionUpdate=false
 if [ "x$kdaemon_nickname" != "x$newDeviceNickname" ]; then
-    update_kdaemon_toml nickname "${newDeviceNickname}"
+    update_kdaemon_toml por.nickname str "${newDeviceNickname}"
     provisionUpdate=true
 fi
-if [ "x$oldUserWallet" != "x$newUserWallet" ]; then
-    update_kdaemon_toml user_wallet ${newUserWallet}
+if [ "x$kdaemon_user_wallet" != "x$newUserWallet" ]; then
+    update_kdaemon_toml core.user_wallet str ${newUserWallet}
     provisionUpdate=true
 fi
 
