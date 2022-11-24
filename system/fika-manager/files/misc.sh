@@ -25,7 +25,7 @@ update_kdaemon_toml() {
     type=$2
     val=$3
     
-    tomato -b tset $key "$val" $KDAEMON_TOML_PATH && sync
+    tomato -b tset $key $type "$val" $KDAEMON_TOML_PATH && sync
 }
 
 # no double-quote

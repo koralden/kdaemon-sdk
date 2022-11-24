@@ -30,27 +30,27 @@ main() {
     newAwsToken=$(echo "$activation" | jaq -r .aws.auth_token)
     newPorNickname=$(echo "$activation" | jaq -r .por.nickname)
 
-    if [ "$newWalletAddr" != "null" -a "x$kdaemon_wallet_address" != "x$newWalletAddr" ]; then
+    if [ -n "$newWalletAddr" -a "$newWalletAddr" != "null" -a "x$kdaemon_wallet_address" != "x$newWalletAddr" ]; then
         update_kdaemon_toml core.wallet_address str "${newWalletAddr}"
         cfgUpdate=true
     fi
-    if [ "$newUserWallet" != "null" -a "x$kdaemon_user_wallet" != "x$newUserWallet" ]; then
+    if [ -n "$newUserWallet" -a "$newUserWallet" != "null" -a "x$kdaemon_user_wallet" != "x$newUserWallet" ]; then
         update_kdaemon_toml core.user_wallet str "${newUserWallet}"
         cfgUpdate=true
     fi
-    if [ "$newBossToken" != "null" -a "x$kdaemon_access_token" != "x$newBossToken" ]; then
+    if [ -n "$newBossToken" -a "$newBossToken" != "null" -a "x$kdaemon_access_token" != "x$newBossToken" ]; then
         update_kdaemon_toml boss.access_token str "${newBossToken}"
         cfgUpdate=true
     fi
     if [ "x$kdaemon_ap_access_token" = "x" ]; then
-        if [ "null" = "$newBossApToken" ]; then
+        if [ -z "$newBossApToken" -o "null" = "$newBossApToken" ]; then
             get_boss_ap_token
         else
             update_kdaemon_toml boss.ap_access_token str "${newBossApToken}"
         fi
         cfgUpdate=true
     fi
-    if [ "$newAwsToken" != "null" -a "x$kdaemon_auth_token" = "x$newAwsToken" ]; then
+    if [ -n "$newAwsToken" -a "$newAwsToken" != "null" -a "x$kdaemon_auth_token" != "x$newAwsToken" ]; then
         update_kdaemon_toml aws.auth_token str ${newAwsToken}
         cfgUpdate=true
     fi
