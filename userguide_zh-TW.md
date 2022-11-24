@@ -7,8 +7,13 @@
 TBD
 
 # 安裝
+可以下載或自行編譯
 
 ## 下載
+直接下載最新已編譯二進制檔並解壓縮到預設目錄  
+```sh
+curl -s https://github.com/koralden/kdaemon-sdk/releases/download/v0.0.8-rpi/kdaemon-0.0.8-rpi.tar.gz | sudo tar xvfz -C /
+```
 
 
 ## 自行編譯
