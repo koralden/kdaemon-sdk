@@ -8,9 +8,21 @@ TBD
 
 # 安裝
 
-## 
+## 下載
 
-# 好何使用
+
+## 自行編譯
+
+請先安裝[Rust Toolchain](https://rustup.rs)
+
+```sh
+git clone https://github.com/koralden/kdaemon-sdk
+cd kdaemon-sdk
+make
+sudo make install
+```
+
+# 開始使用
 
 ## 設備開通/激活
 SSH連線進RPi4，執行如下命令
@@ -40,62 +52,79 @@ fika-manager daemon
 ![image](https://user-images.githubusercontent.com/6879607/203674158-c5b61db8-227b-4993-8863-ae43cdea6fa8.png)
 
 
-接下來執行
-```sh
-fika-easy-setup -a {eth0-IP-address}
-```
-
-
-
 
 ## 綁定
 需搭配手機[K-APP](https://apps.apple.com/tw/app/koralden-k-app-%E7%A4%BE%E7%BE%A4%E7%89%88/id1642699129)完成綁定
 
 首先，先在RPi4執行如下命令
 ```sh
-fika-easy-setup -a {eth0-IP-address}
-
+fika-easy-setup -a 0.0.0.0
 ```
+
+[![asciicast](https://asciinema.org/a/IRTbosy4u0YD9gJxItbabNcri.svg)](https://asciinema.org/a/IRTbosy4u0YD9gJxItbabNcri)  
+
 請記得先完成開通程序，否則easy-setup daemon執行會有(類似)如下錯誤
 ![image](https://user-images.githubusercontent.com/6879607/203676004-cafafec9-d272-4321-a721-090fec51102b.png)
 
-接下來用筆電或電腦的瀏覽器打開[pairing網址](https://raspberrypi:8888)
+接著由筆電(或電腦)瀏覽器打開[pairing網址](https://raspberrypi:8888)
 ![image](https://user-images.githubusercontent.com/6879607/203688941-cf725cd6-d06e-48f4-8e76-723dd3f61e08.png)
 
-最後再使用手機K-APP掃描此QR-CODE完成綁機程序
-(登入)
-tbd
 
-(按地圖右上方+進入綁定)
-tbd
+打開手機K-APP掃描此QR-CODE完成綁機程序  
+(登入)  
+![image](https://user-images.githubusercontent.com/6879607/203730533-90173e56-706b-4531-94cc-4f7582530f0e.png)
+   
 
-(選擇右方QR CODE掃描)
+(按地圖右上方 **+** 進入綁定)  
 
-(對準瀏覽器中的QR code)
+![image](https://user-images.githubusercontent.com/6879607/203730825-7b78c845-3f24-436d-9156-b2b6a1028a5e.png)
+  
+(選擇右方QR CODE掃描)  
+  
+![image](https://user-images.githubusercontent.com/6879607/203731071-7d3b85a5-4745-4683-9d38-1146b854edf4.png)
+  
+  
+(對準瀏覽器中的QR code)  
+  
+ tbd
+  
+(完成)  
+  
+![image](https://user-images.githubusercontent.com/6879607/203731868-b1824619-b1ae-4186-9d15-3a81698d49ad.png)  
+  
+  
 
-(完成)
+  
+綁定成功後，瀏覽器重新刷新(refresh)會發現由QR-code換成如下已綁定資訊(以避免重覆綁定)
+  
+![image](https://user-images.githubusercontent.com/6879607/203734693-f0bbe1eb-4523-4c9a-8e41-f3b05d8ed573.png)
 
-需事先完成錢包申請及註冊程序，詳情請見[K-APP-Userguide](http://todo)
+## 最後
 
+重新執行fika-manager daemon即可
+```sh
+killall -KILL fika-manager
+fika-manager daemon
+```
 
+你可以使用systemd/service將fika-manager放到背景執行並在重新開機後主動呼叫  
 
-![image](https://user-images.githubusercontent.com/6879607/203523539-41278ef0-939c-4578-aba5-5e3374e8c83e.png)
 
 
 
 # 問題排除
-## [Q] 沒辦法寫入預設設定檔及其路徑!
- SDK預設寫入/userdata目錄，請設為writable
+* *kdaemon-sdk沒辦法寫入設定檔及其路徑!*  
+ **SDK預設寫入/userdata目錄，請設為writable**
  ```sh
  sudo chown -R pi:pi /userdata
  chmod -R 750 /userdata
  ```
-## [Q] SD card重新刷寫後，所有設定皆被清除
- 使用者需自行備份/userdata下所有設定，否則需重新執行設備開通流程
+* *RPi4 FW重新刷寫後，所有設定皆被清除*  
+ **使用者需自行備份/userdata下所有設定，否則需重新執行設備開通流程**
 
-## [Q] K-APP登入所使用的錢包從哪裡來?
- 請使用第三方有公信力錢包，如[metamask](https://metamask.io/)，並完成[K-APP註冊流程](https://koralden.org/k-app/userguide)
+* *K-APP登入所使用的錢包從哪裡來?*  
+ **請使用第三方有公信力錢包，如[metamask](https://metamask.io/)，並完成[K-APP註冊流程](https://koralden.org/k-app/userguide)**
  
-## [Q] 綁定時一直出現「opcode不存在」錯誤
- Opcode每5分鐘過期，請**手動refresh**pairing網頁
+* *綁定時一直出現「opcode不存在」錯誤*  
+ **Opcode每5分鐘過期，請手動重新刷新pairing網頁**
 
