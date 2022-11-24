@@ -51,15 +51,32 @@ fika-easy-setup -a {eth0-IP-address}
 ## 綁定
 需搭配手機[K-APP](https://apps.apple.com/tw/app/koralden-k-app-%E7%A4%BE%E7%BE%A4%E7%89%88/id1642699129)完成綁定
 
-首先，一樣先在RPi4執行如下命令
+首先，先在RPi4執行如下命令
 ```sh
 fika-easy-setup -a {eth0-IP-address}
+
 ```
 請記得先完成開通程序，否則easy-setup daemon執行會有(類似)如下錯誤
-![image](https://user-images.githubusercontent.com/6879607/203674952-cf85431a-ac6c-4607-a759-8a4f78718425.png)
+![image](https://user-images.githubusercontent.com/6879607/203676004-cafafec9-d272-4321-a721-090fec51102b.png)
 
+接下來用筆電或電腦的瀏覽器打開[pairing網址](https://raspberrypi:8888)
+![image](https://user-images.githubusercontent.com/6879607/203688941-cf725cd6-d06e-48f4-8e76-723dd3f61e08.png)
 
-接下來使用手機執行K-APP，
+最後再使用手機K-APP掃描此QR-CODE完成綁機程序
+(登入)
+tbd
+
+(按地圖右上方+進入綁定)
+tbd
+
+(選擇右方QR CODE掃描)
+
+(對準瀏覽器中的QR code)
+
+(完成)
+
+需事先完成錢包申請及註冊程序，詳情請見[K-APP-Userguide](http://todo)
+
 
 
 ![image](https://user-images.githubusercontent.com/6879607/203523539-41278ef0-939c-4578-aba5-5e3374e8c83e.png)
@@ -75,4 +92,10 @@ fika-easy-setup -a {eth0-IP-address}
  ```
 ## [Q] SD card重新刷寫後，所有設定皆被清除
  使用者需自行備份/userdata下所有設定，否則需重新執行設備開通流程
+
+## [Q] K-APP登入所使用的錢包從哪裡來?
+ 請使用第三方有公信力錢包，如[metamask](https://metamask.io/)，並完成[K-APP註冊流程](https://koralden.org/k-app/userguide)
+ 
+## [Q] 綁定時一直出現「opcode不存在」錯誤
+ Opcode每5分鐘過期，請**手動refresh**pairing網頁
 
